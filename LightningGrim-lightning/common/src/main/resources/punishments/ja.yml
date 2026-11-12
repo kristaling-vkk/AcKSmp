@@ -1,0 +1,442 @@
+# %check_name% - チェックの名前
+# %description% - チェックの説明
+# %vl% - 違反回数
+# %verbose% - 追加情報
+# %player% - プレイヤー名
+# [alert] - アラート通知を行う特別なコマンド
+# [webhook] - DiscordのWebhookに通知する特別なコマンド
+# [proxy] - プロキシに接続された他のサーバーに通知する特別なコマンド（BungeeCord/Velocity用）
+Punishments:
+  ProtocolBan:
+    remove-violations-after: 2700
+    checks:
+      - "BadPacketsD"
+      - "BadPacketsS"
+      - "BadPacketsY"
+      - "SelfInteract"
+    commands:
+      - "1:1 [alert]"
+      - "1:1 [log]"
+      - "1:0 [webhook]"
+      - "1:0 [proxy]"
+      - "1:0 ban %player% [GroundedGrim] Protocol violation (%check_name%)"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  BehaviorAAlert:
+    remove-violations-after: 2700
+    checks:
+      - "BehaviorA"
+    commands:
+      - "1:1 [alert]"
+      - "1:1 [log]"
+      - "3:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  BlockFlyGhostAlert:
+    remove-violations-after: 2700
+    checks:
+      - "BlockFlyGhost"
+    commands:
+      - "1:1 [alert]"
+      - "1:1 [log]"
+      - "3:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  CrashBan:
+    remove-violations-after: 2700
+    checks:
+      - "Crash"
+      - "!CrashB"
+    commands:
+      - "1:1 [alert]"
+      - "1:1 [log]"
+      - "1:0 [webhook]"
+      - "1:0 [proxy]"
+      - "5:0 ban %player% [GroundedGrim] Crash exploit (%check_name%)"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  CrashBAlert:
+    remove-violations-after: 2700
+    checks:
+      - "CrashB"
+    commands:
+      - "1:1 [alert]"
+      - "5:10 [log]"
+      - "5:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  ExploitBan:
+    remove-violations-after: 2700
+    checks:
+      - "ExploitA"
+    commands:
+      - "1:1 [alert]"
+      - "5:10 [log]"
+      - "5:0 [webhook]"
+      - "10:0 ban %player% [GroundedGrim] Exploit (%check_name%)"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  PlaceBan:
+    remove-violations-after: 2700
+    checks:
+      - "InvalidPlaceA"
+      - "InvalidPlaceB"
+    commands:
+      - "1:1 [alert]"
+      - "1:1 [log]"
+      - "1:0 [webhook]"
+      - "1:0 ban %player% [GroundedGrim] Invalid placement (%check_name%)"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  BadPacketsWKick:
+    remove-violations-after: 2700
+    checks:
+      - "BadPacketsW"
+    commands:
+      - "1:1 [alert]"
+      - "1:1 [log]"
+      - "5:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  BadPacketsFKick:
+    remove-violations-after: 2700
+    checks:
+      - "BadPacketsF"
+    commands:
+      - "1:1 [alert]"
+      - "1:1 [log]"
+      - "10:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  ProtocolKick:
+    remove-violations-after: 2700
+    checks:
+      - "BadPacketsG"
+      - "BadPacketsI"
+      - "BadPacketsK"
+      - "BadPacketsL"
+      - "BadPacketsO"
+      - "BadPacketsH"
+    commands:
+      - "1:1 [alert]"
+      - "1:1 [log]"
+      - "10:0 [webhook]"
+      - "10:0 [proxy]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  Place:
+    remove-violations-after: 2700
+    checks:
+      - "FarPlace"
+      - "AirLiquidPlace"
+      - "AirLiquidBreak"
+    commands:
+      - "1:1 [alert]"
+      - "5:10 [log]"
+      - "5:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  Timer:
+    remove-violations-after: 2700
+    checks:
+      - "Timer"
+      - "TimerLimit"
+      - "TickTimer"
+    commands:
+      - "20:20 [alert]"
+      - "20:20 [log]"
+      - "40:0 [webhook]"
+      - "40:0 [proxy]"
+      - "750:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  CombatKick:
+    remove-violations-after: 2700
+    checks:
+      - "Reach"
+      - "Hitboxes"
+    commands:
+      - "1:1 [alert]"
+      - "1:1 [log]"
+      - "5:0 [webhook]"
+      - "5:0 [proxy]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  WallHit:
+    remove-violations-after: 2700
+    checks:
+      - "WallHit"
+    commands:
+      - "1:1 [alert]"
+      - "1:1 [log]"
+      - "5:0 [webhook]"
+      - "5:0 [proxy]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  NoRotKick:
+    remove-violations-after: 2700
+    checks:
+      - "BehaviorD"
+    commands:
+      - "1:1 [alert]"
+      - "1:1 [log]"
+      - "1:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  TriggerKick:
+    remove-violations-after: 2700
+    checks:
+      - "BehaviorE"
+    commands:
+      - "1:1 [alert]"
+      - "1:1 [log]"
+      - "1:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  TriggerbotKick:
+    remove-violations-after: 2700
+    checks:
+      - "TriggerA"
+    commands:
+      - "1:1 [alert]"
+      - "1:1 [log]"
+      - "5:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  AutoTotemKick:
+    remove-violations-after: 2700
+    checks:
+      - "AutoTotem"
+    commands:
+      - "1:1 [alert]"
+      - "5:10 [log]"
+      - "5:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  AirStuck:
+    remove-violations-after: 2700
+    checks:
+      - "AirStuck"
+    commands:
+      - "1:1 [alert]"
+      - "1:1 [log]"
+      - "3:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  InventoryKick:
+    remove-violations-after: 2700
+    checks:
+      - "Inventory"
+      - "!InventoryD"
+      - "!InventoryE"
+      - "AutoSwapC"
+    commands:
+      - "1:1 [alert]"
+      - "5:10 [log]"
+      - "5:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  InventoryDKick:
+    remove-violations-after: 2700
+    checks:
+      - "InventoryD"
+    commands:
+      - "1:1 [alert]"
+      - "1:1 [log]"
+      - "5:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  InventoryE:
+    remove-violations-after: 2700
+    checks:
+      - "InventoryE"
+    commands:
+      - "5:5 [alert]"
+      - "5:5 [log]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  Simulation:
+    remove-violations-after: 2700
+    checks:
+      - "Simulation"
+      - "GroundSpoof"
+      - "NoFall"
+    commands:
+      - "100:40 [alert]"
+      - "1:1 [log]"
+      - "100:100 [webhook]"
+      - "100:100 [proxy]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  Knockback:
+    remove-violations-after: 2700
+    checks:
+      - "Knockback"
+      - "Explosion"
+    commands:
+      - "5:5 [alert]"
+      - "1:1 [log]"
+      - "20:20 [webhook]"
+      - "20:20 [proxy]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  Post:
+    remove-violations-after: 2700
+    checks:
+      - "Post"
+    commands:
+      - "20:20 [alert]"
+      - "1:1 [log]"
+      - "40:40 [webhook]"
+      - "40:40 [proxy]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  BadPackets:
+    remove-violations-after: 2700
+    checks:
+      - "BadPackets"
+      - "!BadPacketsD"
+      - "!BadPacketsF"
+      - "!BadPacketsG"
+      - "!BadPacketsH"
+      - "!BadPacketsI"
+      - "!BadPacketsK"
+      - "!BadPacketsL"
+      - "!BadPacketsO"
+      - "!BadPacketsS"
+      - "!BadPacketsW"
+      - "!BadPacketsY"
+      - "PacketOrder"
+    commands:
+      - "20:20 [alert]"
+      - "1:1 [log]"
+      - "40:40 [webhook]"
+      - "40:40 [proxy]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  ElytraKick:
+    remove-violations-after: 2700
+    checks:
+      - "ElytraA"
+      - "ElytraB"
+      - "ElytraC"
+      - "ElytraD"
+    commands:
+      - "1:1 [alert]"
+      - "5:10 [log]"
+      - "5:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  ElytraJKick:
+    remove-violations-after: 2700
+    checks:
+      - "ElytraJ"
+    commands:
+      - "5:3 [alert]"
+      - "1:1 [log]"
+      - "5:3 [webhook]"
+      - "5:3 [proxy]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  ElytraMKick:
+    remove-violations-after: 2700
+    checks:
+      - "ElytraM"
+    commands:
+      - "1:1 [alert]"
+      - "5:10 [log]"
+      - "5:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  ElytraOAlert:
+    remove-violations-after: 2700
+    checks:
+      - "ElytraO"
+    commands:
+      - "1:1 [alert]"
+      - "1:1 [log]"
+      - "3:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  ElytraPAlert:
+    remove-violations-after: 2700
+    checks:
+      - "ElytraP"
+    commands:
+      - "1:1 [alert]"
+      - "1:1 [log]"
+      - "3:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  FreezeAttackAlert:
+    remove-violations-after: 2700
+    checks:
+      - "FreezeAttack"
+    commands:
+      - "1:1 [alert]"
+      - "1:1 [log]"
+      - "3:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  Elytra:
+    remove-violations-after: 2700
+    checks:
+      - "Elytra"
+      - "!ElytraA"
+      - "!ElytraB"
+      - "!ElytraC"
+      - "!ElytraD"
+      - "!ElytraJ"
+      - "!ElytraL"
+      - "!ElytraM"
+      - "!ElytraO"
+      - "!ElytraP"
+    commands:
+      - "10:5 [alert]"
+      - "10:5 [log]"
+      - "20:10 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  SprintKick:
+    remove-violations-after: 2700
+    checks:
+      - "SprintA"
+      - "SprintC"
+    commands:
+      - "1:1 [alert]"
+      - "1:1 [log]"
+      - "10:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  Misc:
+    remove-violations-after: 2700
+    checks:
+      - "Vehicle"
+      - "NoSlow"
+      - "Sprint"
+      - "!SprintA"
+      - "!SprintC"
+      - "MultiActions"
+      - "Place"
+      - "!InvalidPlaceA"
+      - "!InvalidPlaceB"
+      - "!FarPlace"
+      - "!AirLiquidPlace"
+      - "!AirLiquidBreak"
+      - "Baritone"
+      - "Break"
+      - "TransactionOrder"
+      - "Chat"
+      - "ExploitB"
+    commands:
+      - "10:5 [alert]"
+      - "1:1 [log]"
+      - "20:10 [webhook]"
+      - "20:10 [proxy]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  Combat:
+    remove-violations-after: 2700
+    checks:
+      - "Interact"
+      - "Aim"
+    commands:
+      - "20:40 [alert]"
+      - "1:1 [log]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  AuraSnapBack:
+    remove-violations-after: 2700
+    checks:
+      - "AuraSnapBack"
+    commands:
+      - "5:10 [alert]"
+      - "5:10 [log]"
+      - "10:0 [webhook]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  # バージョン2.2.10時点では、AutoClickerのチェックはまだなく、これはプレースホルダーです。Grimは将来的にAutoClickerのチェックを追加予定です。
+  Autoclicker:
+    remove-violations-after: 2700
+    checks:
+      - "Autoclicker"
+    commands:
+      - "20:40 [alert]"
+      - "1:1 [log]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
+  # Heuristic checks ported from Grom. Statistical, so alert/log only - no automatic kicks.
+  Heuristics:
+    remove-violations-after: 2700
+    checks:
+      - "KillAuraZero"
+      - "AuraHitSnap"
+      - "AuraMovement"
+      - "ScaffoldDirection"
+      - "ScaffoldRatio"
+      - "ScaffoldSync"
+    commands:
+      - "10:20 [alert]"
+      - "1:1 [log]"
+      - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
