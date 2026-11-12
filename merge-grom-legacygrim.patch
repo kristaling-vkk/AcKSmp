@@ -1,0 +1,2414 @@
+diff --git a/bukkit/src/main/java/ac/grim/grimac/platform/bukkit/GrimACBukkitLoaderPlugin.java b/bukkit/src/main/java/ac/grim/grimac/platform/bukkit/GrimACBukkitLoaderPlugin.java
+index 51e4fb9..14e5c9e 100644
+--- a/bukkit/src/main/java/ac/grim/grimac/platform/bukkit/GrimACBukkitLoaderPlugin.java
++++ b/bukkit/src/main/java/ac/grim/grimac/platform/bukkit/GrimACBukkitLoaderPlugin.java
+@@ -1,6 +1,13 @@
+ package ac.grim.grimac.platform.bukkit;
+ 
+ import ac.grim.grimac.GrimAPI;
++import org.bukkit.entity.Player;
++import ac.grim.grimac.utils.reflection.ReflectionUtils;
++import ac.grim.grimac.platform.bukkit.entity.BukkitGrimEntity;
++import ac.grim.grimac.platform.bukkit.events.GlideSwapGuard;
++import ac.grim.grimac.platform.bukkit.events.CrystalSwapGuard;
++import ac.grim.grimac.platform.bukkit.events.BlockPlaceLimiter;
++import ac.grim.grimac.platform.bukkit.events.BlockPhaseProtection;
+ import ac.grim.grimac.GrimExternalAPI;
+ import ac.grim.grimac.api.GrimAPIProvider;
+ import ac.grim.grimac.api.GrimAbstractAPI;
+@@ -98,6 +105,41 @@ public final class GrimACBukkitLoaderPlugin extends JavaPlugin implements Platfo
+     @Override
+     public void onEnable() {
+         GrimAPI.INSTANCE.start();
++        registerServerSideGuards();
++    }
++
++    // Server-side guards ported from LegacyGrim (tightening patches only): block/pearl phasing, actions from inside
++    // a solid block, block placement budget, crystal swap/rate limits, attack on the slot-swap tick, glide swap cycling.
++    // Some of them need Paper-only API; on plain Spigot those are skipped instead of failing plugin startup.
++    private void registerServerSideGuards() {
++        try {
++            BlockPhaseProtection.start(); // also registers EmbeddedInteractionGuard, 1.17+ only
++
++            boolean currentTick = ReflectionUtils.hasMethod(Bukkit.class, "getCurrentTick");
++            if (currentTick) {
++                Bukkit.getPluginManager().registerEvents(new BlockPlaceLimiter(), this);
++            }
++
++            if (currentTick && ReflectionUtils.hasClass("io.papermc.paper.event.player.PrePlayerAttackEntityEvent")) {
++                Bukkit.getPluginManager().registerEvents(new CrystalSwapGuard(), this);
++            } else {
++                getLogger().warning("Crystal swap/rate guard needs Paper 1.20+, skipping it on this server");
++            }
++
++            if (currentTick && ReflectionUtils.hasClass("com.destroystokyo.paper.event.player.PlayerArmorChangeEvent")) {
++                GlideSwapGuard glideSwapGuard = new GlideSwapGuard();
++                Bukkit.getPluginManager().registerEvents(glideSwapGuard, this);
++                for (Player player : Bukkit.getOnlinePlayers()) {
++                    GrimAPI.INSTANCE.getScheduler().getEntityScheduler().execute(new BukkitGrimEntity(player),
++                            GrimAPI.INSTANCE.getGrimPlugin(), () -> glideSwapGuard.initialize(player), null, 1);
++                }
++            } else {
++                getLogger().warning("Glide swap guard needs Paper, skipping it on this server");
++            }
++        } catch (Throwable t) {
++            // Never let an optional guard take the whole anticheat down
++            getLogger().log(java.util.logging.Level.SEVERE, "Failed to register server-side guards", t);
++        }
+     }
+ 
+     @Override
+diff --git a/bukkit/src/main/java/ac/grim/grimac/platform/bukkit/events/BlockPhaseProtection.java b/bukkit/src/main/java/ac/grim/grimac/platform/bukkit/events/BlockPhaseProtection.java
+new file mode 100644
+index 0000000..d267cbf
+--- /dev/null
++++ b/bukkit/src/main/java/ac/grim/grimac/platform/bukkit/events/BlockPhaseProtection.java
+@@ -0,0 +1,173 @@
++package ac.grim.grimac.platform.bukkit.events;
++
++import ac.grim.grimac.GrimAPI;
++import ac.grim.grimac.platform.api.Platform;
++import ac.grim.grimac.platform.api.scheduler.TaskHandle;
++import ac.grim.grimac.platform.bukkit.entity.BukkitGrimEntity;
++import ac.grim.grimac.platform.bukkit.GrimACBukkitLoaderPlugin;
++import com.github.retrooper.packetevents.PacketEvents;
++import com.github.retrooper.packetevents.manager.server.ServerVersion;
++import ac.grim.grimac.platform.bukkit.utils.reflection.PaperUtils;
++import org.bukkit.Bukkit;
++import org.bukkit.GameMode;
++import org.bukkit.Location;
++import org.bukkit.Material;
++import org.bukkit.World;
++import org.bukkit.block.Block;
++import org.bukkit.entity.EnderPearl;
++import org.bukkit.entity.Player;
++import org.bukkit.event.EventHandler;
++import org.bukkit.event.EventPriority;
++import org.bukkit.event.Listener;
++import org.bukkit.event.Event;
++import org.bukkit.event.block.Action;
++import org.bukkit.event.player.PlayerInteractEvent;
++import org.bukkit.event.entity.ProjectileLaunchEvent;
++import org.bukkit.event.player.PlayerJoinEvent;
++import org.bukkit.event.player.PlayerQuitEvent;
++import org.bukkit.event.player.PlayerTeleportEvent;
++import org.bukkit.util.BoundingBox;
++import org.bukkit.util.Vector;
++
++import java.util.Map;
++import java.util.UUID;
++import java.util.concurrent.ConcurrentHashMap;
++
++public final class BlockPhaseProtection implements Listener {
++    private final Map<UUID, State> states = new ConcurrentHashMap<>();
++
++    private static final class State {
++        volatile TaskHandle task;
++        long teleport;
++        volatile boolean pending;
++    }
++
++    private static boolean enabled(String key) {
++        return GrimAPI.INSTANCE.getConfigManager().getConfig().getBooleanElse(key, true);
++    }
++
++    public static void start() {
++        if (PacketEvents.getAPI().getServerManager().getVersion().isOlderThan(ServerVersion.V_1_17)) return;
++        BlockPhaseProtection protection = new BlockPhaseProtection();
++        Bukkit.getPluginManager().registerEvents(protection, GrimACBukkitLoaderPlugin.LOADER);
++        Bukkit.getPluginManager().registerEvents(new EmbeddedInteractionGuard(), GrimACBukkitLoaderPlugin.LOADER);
++        Bukkit.getOnlinePlayers().forEach(protection::watch);
++    }
++
++    public void watch(Player player) {
++        State state = new State();
++        if (states.putIfAbsent(player.getUniqueId(), state) != null) return;
++        state.task = GrimAPI.INSTANCE.getScheduler().getEntityScheduler().runAtFixedRate(new BukkitGrimEntity(player),
++                GrimAPI.INSTANCE.getGrimPlugin(), () -> check(player, false), null, 1, 5);
++        if (state.task == null) states.remove(player.getUniqueId(), state);
++        else if (states.get(player.getUniqueId()) != state) state.task.cancel();
++    }
++
++    @EventHandler(priority = EventPriority.MONITOR)
++    public void onJoin(PlayerJoinEvent event) {
++        watch(event.getPlayer());
++    }
++
++    @EventHandler
++    public void onQuit(PlayerQuitEvent event) {
++        State state = states.remove(event.getPlayer().getUniqueId());
++        if (state != null && state.task != null) state.task.cancel();
++    }
++
++    @EventHandler(priority = EventPriority.HIGHEST)
++    public void onInteract(PlayerInteractEvent event) {
++        if (event.useItemInHand() == Event.Result.DENY || event.getItem() == null || event.getItem().getType() != Material.ENDER_PEARL
++                || event.getAction() != Action.RIGHT_CLICK_AIR && event.getAction() != Action.RIGHT_CLICK_BLOCK
++                || !enabled("PearlPhasePrevention")) return;
++        if (closeToWall(event.getPlayer(), event.getPlayer().getEyeLocation().getDirection()))
++            event.setUseItemInHand(Event.Result.DENY);
++    }
++
++    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
++    public void onLaunch(ProjectileLaunchEvent event) {
++        if (event.getEntity() instanceof EnderPearl pearl && pearl.getShooter() instanceof Player player
++                && enabled("PearlPhasePrevention") && closeToWall(player, pearl.getVelocity())) event.setCancelled(true);
++    }
++
++    private static boolean closeToWall(Player player, Vector direction) {
++        return direction.lengthSquared() > 0 && obstructions(player, player.getLocation(), direction) == 2;
++    }
++
++    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
++    public void onTeleport(PlayerTeleportEvent event) {
++        boolean pearl = event.getCause() == PlayerTeleportEvent.TeleportCause.ENDER_PEARL && enabled("PearlPhasePrevention");
++        if (!pearl && !enabled("PushOutOfBlocks")) return;
++        Player player = event.getPlayer();
++        State state = states.get(player.getUniqueId());
++        if (state == null || state.pending) return;
++        long teleport = ++state.teleport;
++        GrimAPI.INSTANCE.getScheduler().getEntityScheduler().execute(new BukkitGrimEntity(player), GrimAPI.INSTANCE.getGrimPlugin(),
++                () -> { if (state.teleport == teleport) check(player, pearl); }, null, 1);
++    }
++
++    void check(Player player, boolean pearl) {
++        State state = states.get(player.getUniqueId());
++        if (state == null || state.pending || !player.isOnline() || player.isDead() || player.getGameMode() == GameMode.SPECTATOR
++                || !(pearl ? enabled("PearlPhasePrevention") : enabled("PushOutOfBlocks"))) return;
++        Location current = player.getLocation();
++        int obstruction = obstructions(player, current);
++        if (obstruction != 2) return;
++        Location exit = null;
++        for (int up = 1; up <= 3; up++) {
++            Location candidate = current.clone();
++            candidate.setY(Math.floor(current.getY()) + up);
++            if (obstructions(player, candidate) == 0) { exit = candidate; break; }
++        }
++        if (exit == null) return;
++        state.pending = true;
++        PaperUtils.teleportAsync(player, exit).whenComplete((success, failure) -> state.pending = false);
++    }
++
++    private static boolean readable(Location location) {
++        World world = location.getWorld();
++        int x = location.getBlockX() >> 4, z = location.getBlockZ() >> 4;
++        return world.isChunkLoaded(x, z) && (GrimAPI.INSTANCE.getPlatform() != Platform.FOLIA || Bukkit.isOwnedByCurrentRegion(world, x, z));
++    }
++
++    static int obstructions(Player player, Location location) {
++        return obstructions(player, location, null);
++    }
++
++    private static int obstructions(Player player, Location location, Vector direction) {
++        Location current = player.getLocation();
++        BoundingBox body = player.getBoundingBox().clone().shift(location.getX() - current.getX(),
++                location.getY() - current.getY(), location.getZ() - current.getZ())
++                .expand(-1.0E-5);
++        if (direction != null) body.expand(0.85, 0.25, 0.85, 0.85, 0.25, 0.85);
++        Vector origin = direction == null ? null : player.getEyeLocation().add(0, -0.1F, 0).toVector();
++        World world = location.getWorld();
++        int result = 0;
++        double closest = Double.POSITIVE_INFINITY;
++        for (int x = (int) Math.floor(body.getMinX()); x <= Math.floor(body.getMaxX()); x++) {
++            for (int z = (int) Math.floor(body.getMinZ()); z <= Math.floor(body.getMaxZ()); z++) {
++                if (!readable(new Location(world, x, location.getY(), z))) return 2;
++                for (int y = Math.max(world.getMinHeight(), (int) Math.floor(body.getMinY()) - 1);
++                     y <= Math.min(world.getMaxHeight() - 1, Math.floor(body.getMaxY())); y++) {
++                    Block block = world.getBlockAt(x, y, z);
++                    if (block.isEmpty() || block.isLiquid() || direction != null && block.getType().hasGravity()) continue;
++                    var shapes = block.getCollisionShape().getBoundingBoxes();
++                    boolean solid = !block.getType().hasGravity() && shapes.size() == 1
++                            && shapes.iterator().next().equals(new BoundingBox(0, 0, 0, 1, 1, 1));
++                    for (BoundingBox shape : shapes) {
++                        shape = shape.clone().shift(x, y, z);
++                        if (!body.overlaps(shape)) continue;
++                        if (direction != null) {
++                            var hit = shape.expand(direction.getY() > 0 ? 0 : 0.125).rayTrace(origin, direction, 2.0);
++                            if (hit == null) continue;
++                            double distance = hit.getHitPosition().distanceSquared(origin);
++                            if (distance > closest || distance == closest && result == 2) continue;
++                            closest = distance;
++                        } else if (solid) return 2;
++                        result = solid ? 2 : 1;
++                    }
++                }
++            }
++        }
++        return result;
++    }
++}
+diff --git a/bukkit/src/main/java/ac/grim/grimac/platform/bukkit/events/BlockPlaceLimiter.java b/bukkit/src/main/java/ac/grim/grimac/platform/bukkit/events/BlockPlaceLimiter.java
+new file mode 100644
+index 0000000..d3bfdd1
+--- /dev/null
++++ b/bukkit/src/main/java/ac/grim/grimac/platform/bukkit/events/BlockPlaceLimiter.java
+@@ -0,0 +1,71 @@
++package ac.grim.grimac.platform.bukkit.events;
++
++import ac.grim.grimac.GrimAPI;
++import com.github.retrooper.packetevents.protocol.item.type.ItemTypes;
++import org.bukkit.Bukkit;
++import org.bukkit.event.EventHandler;
++import org.bukkit.event.EventPriority;
++import org.bukkit.event.Listener;
++import org.bukkit.event.block.BlockPlaceEvent;
++import org.bukkit.event.player.PlayerQuitEvent;
++
++import java.util.ArrayList;
++import java.util.List;
++import java.util.Map;
++import java.util.UUID;
++import java.util.concurrent.ConcurrentHashMap;
++
++public final class BlockPlaceLimiter implements Listener {
++    private final Map<UUID, Budget> budgets = new ConcurrentHashMap<>();
++
++    private static final class Budget {
++        int tick;
++        final List<Attempt> attempts = new ArrayList<>(2);
++    }
++
++    private static final class Attempt {
++        final BlockPlaceEvent event;
++        boolean finished;
++
++        Attempt(BlockPlaceEvent event) {
++            this.event = event;
++        }
++    }
++
++    @EventHandler(priority = EventPriority.HIGHEST)
++    public void onPlace(BlockPlaceEvent event) {
++        // getByName returns null for items PacketEvents doesn't know (e.g. modded), which would throw on every placement
++        var itemType = ItemTypes.getByName(event.getItemInHand().getType().getKey().toString());
++        if (itemType == null || itemType.getPlacedType() == null) return;
++        int limit = GrimAPI.INSTANCE.getConfigManager().getConfig().getIntElse("BlockPlaceLimit", 2);
++        if (limit <= 0) return;
++        Budget budget = budgets.computeIfAbsent(event.getPlayer().getUniqueId(), id -> new Budget());
++        synchronized (budget) {
++            int tick = Bukkit.getCurrentTick();
++            if (budget.tick != tick) {
++                budget.tick = tick;
++                budget.attempts.clear();
++            }
++            budget.attempts.removeIf(a -> a.finished && (a.event.isCancelled() || !a.event.canBuild()));
++            if (budget.attempts.size() >= limit) {
++                event.setCancelled(true);
++            } else {
++                budget.attempts.add(new Attempt(event));
++            }
++        }
++    }
++
++    @EventHandler(priority = EventPriority.MONITOR)
++    public void onComplete(BlockPlaceEvent event) {
++        Budget budget = budgets.get(event.getPlayer().getUniqueId());
++        if (budget == null) return;
++        synchronized (budget) {
++            for (Attempt attempt : budget.attempts) if (attempt.event == event) attempt.finished = true;
++        }
++    }
++
++    @EventHandler(priority = EventPriority.MONITOR)
++    public void onQuit(PlayerQuitEvent event) {
++        budgets.remove(event.getPlayer().getUniqueId());
++    }
++}
+diff --git a/bukkit/src/main/java/ac/grim/grimac/platform/bukkit/events/CrystalSwapGuard.java b/bukkit/src/main/java/ac/grim/grimac/platform/bukkit/events/CrystalSwapGuard.java
+new file mode 100644
+index 0000000..6780977
+--- /dev/null
++++ b/bukkit/src/main/java/ac/grim/grimac/platform/bukkit/events/CrystalSwapGuard.java
+@@ -0,0 +1,146 @@
++package ac.grim.grimac.platform.bukkit.events;
++
++import ac.grim.grimac.GrimAPI;
++import io.papermc.paper.event.player.PrePlayerAttackEntityEvent;
++import org.bukkit.Bukkit;
++import org.bukkit.Material;
++import org.bukkit.entity.EnderCrystal;
++import org.bukkit.entity.Player;
++import org.bukkit.event.EventHandler;
++import org.bukkit.event.Cancellable;
++import org.bukkit.event.EventPriority;
++import org.bukkit.event.Listener;
++import org.bukkit.event.entity.EntityPlaceEvent;
++import org.bukkit.event.player.PlayerItemHeldEvent;
++import org.bukkit.event.player.PlayerQuitEvent;
++import org.bukkit.event.player.PlayerSwapHandItemsEvent;
++import org.bukkit.event.inventory.InventoryClickEvent;
++import org.bukkit.event.inventory.InventoryDragEvent;
++import org.bukkit.inventory.EquipmentSlot;
++import org.bukkit.inventory.PlayerInventory;
++
++import java.util.Map;
++import java.util.UUID;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.function.LongSupplier;
++
++public final class CrystalSwapGuard implements Listener {
++    private final Map<UUID, Integer> slotChanges = new ConcurrentHashMap<>();
++    private final Map<UUID, Budget> budgets = new ConcurrentHashMap<>();
++    private final LongSupplier clock;
++    private static final long SECOND = 1_000_000_000L;
++    public CrystalSwapGuard() { this(System::nanoTime); }
++    CrystalSwapGuard(LongSupplier clock) { this.clock = clock; }
++
++    private static final class Budget {
++        long heldSince;
++        Attempt last;
++    }
++    private static final class Attempt {
++        final Cancellable event;
++        final long time;
++        final double delay;
++        final int rate;
++        Attempt previous;
++        boolean finished;
++        Attempt(Cancellable event, long time, double delay, int rate, Attempt previous) {
++            this.event = event; this.time = time; this.delay = delay; this.rate = rate; this.previous = previous;
++        }
++    }
++    private Budget budget(Player player) {
++        return budgets.computeIfAbsent(player.getUniqueId(), id -> {
++            Budget value = new Budget(); value.heldSince = clock.getAsLong() - SECOND; return value;
++        });
++    }
++    private void changed(Player player) {
++        Budget value = budget(player);
++        synchronized (value) { value.heldSince = clock.getAsLong(); }
++    }
++
++    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
++    public void onSlotChange(PlayerItemHeldEvent event) {
++        if (event.getPreviousSlot() != event.getNewSlot()) {
++            slotChanges.put(event.getPlayer().getUniqueId(), Bukkit.getCurrentTick());
++            changed(event.getPlayer());
++        }
++    }
++
++    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
++    public void onInventory(InventoryClickEvent event) {
++        if (event.getWhoClicked() instanceof Player p && (event.getHotbarButton() == p.getInventory().getHeldItemSlot()
++                || event.getClickedInventory() instanceof PlayerInventory && event.getSlot() == p.getInventory().getHeldItemSlot())) changed(p);
++    }
++    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
++    public void onDrag(InventoryDragEvent event) {
++        if (event.getWhoClicked() instanceof Player p && event.getRawSlots().stream().anyMatch(slot ->
++                event.getView().getInventory(slot) instanceof PlayerInventory && event.getView().convertSlot(slot) == p.getInventory().getHeldItemSlot())) changed(p);
++    }
++    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
++    public void onHandSwap(PlayerSwapHandItemsEvent event) { changed(event.getPlayer()); }
++
++    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
++    public void onAttack(PrePlayerAttackEntityEvent event) {
++        Integer changed = slotChanges.get(event.getPlayer().getUniqueId());
++        if (event.willAttack() && changed != null && changed == Bukkit.getCurrentTick())
++            event.setCancelled(true);
++    }
++
++    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
++    public void onPlace(EntityPlaceEvent event) {
++        if (!(event.getEntity() instanceof EnderCrystal) || event.getPlayer() == null) return;
++        onPlace(event, event.getPlayer(), event.getHand());
++    }
++    void onPlace(Cancellable event, Player player, EquipmentSlot hand) {
++        Integer changed = slotChanges.get(player.getUniqueId());
++        int elapsed = changed == null ? 1 : Bukkit.getCurrentTick() - changed;
++        if (player.getInventory().getItem(hand).getType() != Material.END_CRYSTAL
++                || (hand == EquipmentSlot.HAND && elapsed >= 0 && elapsed < 1
++                && !GrimAPI.INSTANCE.getConfigManager().getConfig().getBooleanElse("AllowCrystalSilentSwap", false)))
++            event.setCancelled(true);
++        if (event.isCancelled()) return;
++        Budget value = budget(player);
++        var config = GrimAPI.INSTANCE.getConfigManager().getConfig();
++        int normal = config.getIntElse("CrystalPlaceLimit", 6);
++        int swapped = config.getIntElse("CrystalSwapPlaceLimit", 0);
++        synchronized (value) {
++            long now = clock.getAsLong();
++            boolean swap = hand == EquipmentSlot.HAND && now - value.heldSince < SECOND;
++            limitPlacement(event, player, !swap || swapped <= 0 ? normal : normal <= 0 ? swapped : Math.min(normal, swapped), now);
++        }
++    }
++
++    void limitPlacement(Cancellable event, Player player, int rate, long now) {
++        if (rate <= 0) return;
++        Budget value = budget(player);
++        synchronized (value) {
++            while (value.last != null && value.last.finished && value.last.event.isCancelled()) value.last = value.last.previous;
++            Attempt last = value.last;
++            if (last != null && last.finished) last.previous = null;
++            double period = SECOND / (double) rate;
++            long elapsed = last == null ? Long.MAX_VALUE : now - last.time;
++            double wait = last == null ? 0 : (last.rate == rate ? last.delay : period) - elapsed;
++            if (wait <= -period) wait = 0;
++            if (wait > 1 || last != null && elapsed + 1.0 < period / 2) event.setCancelled(true);
++            else value.last = new Attempt(event, now, wait + period, rate, last);
++        }
++    }
++
++    @EventHandler(priority = EventPriority.MONITOR)
++    public void onComplete(EntityPlaceEvent event) {
++        if (!(event.getEntity() instanceof EnderCrystal) || event.getPlayer() == null) return;
++        onComplete(event, event.getPlayer());
++    }
++    void onComplete(Cancellable event, Player player) {
++        Budget value = budgets.get(player.getUniqueId());
++        if (value != null) synchronized (value) {
++            for (Attempt attempt = value.last; attempt != null; attempt = attempt.previous)
++                if (attempt.event == event) attempt.finished = true;
++        }
++    }
++
++    @EventHandler(priority = EventPriority.MONITOR)
++    public void onQuit(PlayerQuitEvent event) {
++        slotChanges.remove(event.getPlayer().getUniqueId());
++        budgets.remove(event.getPlayer().getUniqueId());
++    }
++}
+diff --git a/bukkit/src/main/java/ac/grim/grimac/platform/bukkit/events/EmbeddedInteractionGuard.java b/bukkit/src/main/java/ac/grim/grimac/platform/bukkit/events/EmbeddedInteractionGuard.java
+new file mode 100644
+index 0000000..d324718
+--- /dev/null
++++ b/bukkit/src/main/java/ac/grim/grimac/platform/bukkit/events/EmbeddedInteractionGuard.java
+@@ -0,0 +1,84 @@
++package ac.grim.grimac.platform.bukkit.events;
++
++import ac.grim.grimac.GrimAPI;
++import ac.grim.grimac.platform.api.Platform;
++import org.bukkit.Bukkit;
++import org.bukkit.GameMode;
++import org.bukkit.entity.Player;
++import org.bukkit.event.Event;
++import org.bukkit.event.EventHandler;
++import org.bukkit.event.EventPriority;
++import org.bukkit.event.Listener;
++import org.bukkit.event.block.Action;
++import org.bukkit.event.block.BlockPlaceEvent;
++import org.bukkit.event.entity.EntityPlaceEvent;
++import org.bukkit.event.entity.ProjectileLaunchEvent;
++import org.bukkit.event.player.PlayerInteractAtEntityEvent;
++import org.bukkit.event.player.PlayerInteractEntityEvent;
++import org.bukkit.event.player.PlayerInteractEvent;
++import org.bukkit.event.player.PlayerItemConsumeEvent;
++import org.bukkit.util.BoundingBox;
++
++public final class EmbeddedInteractionGuard implements Listener {
++    static boolean blocked(Player player) {
++        if (player.getGameMode() == GameMode.SPECTATOR) return false;
++        var world = player.getWorld();
++        var body = player.getBoundingBox().clone().expand(-1.0E-5);
++        for (int x = (int) Math.floor(body.getMinX()); x <= Math.floor(body.getMaxX()); x++) {
++            for (int z = (int) Math.floor(body.getMinZ()); z <= Math.floor(body.getMaxZ()); z++) {
++                if (!world.isChunkLoaded(x >> 4, z >> 4)
++                        || GrimAPI.INSTANCE.getPlatform() == Platform.FOLIA && !Bukkit.isOwnedByCurrentRegion(world, x >> 4, z >> 4)) return true;
++                for (int y = Math.max(world.getMinHeight(), (int) Math.floor(body.getMinY()));
++                     y <= Math.min(world.getMaxHeight() - 1, Math.floor(body.getMaxY())); y++) {
++                    var block = world.getBlockAt(x, y, z);
++                    if (block.isEmpty() || block.isLiquid() || block.getType().hasGravity()) continue;
++                    var shapes = block.getCollisionShape().getBoundingBoxes();
++                    if (shapes.size() != 1) continue;
++                    var shape = shapes.iterator().next();
++                    if (shape.equals(new BoundingBox(0, 0, 0, 1, 1, 1)) && body.overlaps(shape.clone().shift(x, y, z))) return true;
++                }
++            }
++        }
++        return false;
++    }
++
++    @EventHandler(priority = EventPriority.HIGHEST)
++    public void onInteract(PlayerInteractEvent event) {
++        if ((event.getAction() == Action.RIGHT_CLICK_AIR || event.getAction() == Action.RIGHT_CLICK_BLOCK) && blocked(event.getPlayer())) {
++            var item = event.getItem();
++            if (item == null || !item.getType().isEdible()) event.setUseItemInHand(Event.Result.DENY);
++            event.setUseInteractedBlock(Event.Result.DENY);
++        }
++    }
++
++    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
++    public void onEntity(PlayerInteractEntityEvent event) {
++        if (blocked(event.getPlayer())) event.setCancelled(true);
++    }
++
++    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
++    public void onAtEntity(PlayerInteractAtEntityEvent event) {
++        if (blocked(event.getPlayer())) event.setCancelled(true);
++    }
++
++    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
++    public void onBlockPlace(BlockPlaceEvent event) {
++        if (blocked(event.getPlayer())) event.setCancelled(true);
++    }
++
++    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
++    public void onEntityPlace(EntityPlaceEvent event) {
++        if (event.getPlayer() != null && blocked(event.getPlayer())) event.setCancelled(true);
++    }
++
++    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
++    public void onLaunch(ProjectileLaunchEvent event) {
++        if (event.getEntity().getShooter() instanceof Player player && blocked(player)) event.setCancelled(true);
++    }
++
++    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
++    public void onConsume(PlayerItemConsumeEvent event) {
++        var type = event.getItem().getType();
++        if (!type.isEdible() && blocked(event.getPlayer())) event.setCancelled(true);
++    }
++}
+diff --git a/bukkit/src/main/java/ac/grim/grimac/platform/bukkit/events/GlideSwapGuard.java b/bukkit/src/main/java/ac/grim/grimac/platform/bukkit/events/GlideSwapGuard.java
+new file mode 100644
+index 0000000..e0e902d
+--- /dev/null
++++ b/bukkit/src/main/java/ac/grim/grimac/platform/bukkit/events/GlideSwapGuard.java
+@@ -0,0 +1,65 @@
++package ac.grim.grimac.platform.bukkit.events;
++
++import com.destroystokyo.paper.event.player.PlayerArmorChangeEvent;
++import org.bukkit.Bukkit;
++import org.bukkit.Material;
++import org.bukkit.entity.Player;
++import org.bukkit.event.EventHandler;
++import org.bukkit.event.EventPriority;
++import org.bukkit.event.Listener;
++import org.bukkit.event.entity.EntityToggleGlideEvent;
++import org.bukkit.event.inventory.InventoryClickEvent;
++import org.bukkit.event.inventory.InventoryType;
++import org.bukkit.event.player.PlayerJoinEvent;
++import org.bukkit.event.player.PlayerQuitEvent;
++
++import java.util.Map;
++import java.util.UUID;
++import java.util.concurrent.ConcurrentHashMap;
++
++public final class GlideSwapGuard implements Listener {
++    private final Map<UUID, Integer> equippedSince = new ConcurrentHashMap<>();
++
++    private static boolean hasElytra(Player player) {
++        var chest = player.getInventory().getChestplate();
++        return chest != null && chest.getType() == Material.ELYTRA;
++    }
++
++    @EventHandler(priority = EventPriority.MONITOR)
++    public void onJoin(PlayerJoinEvent event) {
++        initialize(event.getPlayer());
++    }
++
++    public void initialize(Player player) {
++        if (hasElytra(player)) equippedSince.put(player.getUniqueId(), Bukkit.getCurrentTick() - 2);
++    }
++
++    @EventHandler(priority = EventPriority.MONITOR)
++    public void onArmor(PlayerArmorChangeEvent event) {
++        if (event.getSlotType() != PlayerArmorChangeEvent.SlotType.CHEST) return;
++        if (event.getNewItem().getType() == Material.ELYTRA)
++            equippedSince.putIfAbsent(event.getPlayer().getUniqueId(), Bukkit.getCurrentTick());
++        else equippedSince.remove(event.getPlayer().getUniqueId());
++    }
++
++    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
++    public void onInventory(InventoryClickEvent event) {
++        if (event.getWhoClicked() instanceof Player player && event.getSlotType() == InventoryType.SlotType.ARMOR
++                && event.getSlot() == 38) equippedSince.put(player.getUniqueId(), Bukkit.getCurrentTick());
++    }
++
++    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
++    public void onGlide(EntityToggleGlideEvent event) {
++        if (!event.isGliding() || !(event.getEntity() instanceof Player player) || !hasElytra(player)) return;
++        int tick = Bukkit.getCurrentTick();
++        Integer since = equippedSince.get(player.getUniqueId());
++        if (since == null || tick - since >= 0 && tick - since < 2) {
++            event.setCancelled(true);
++        }
++    }
++
++    @EventHandler(priority = EventPriority.MONITOR)
++    public void onQuit(PlayerQuitEvent event) {
++        equippedSince.remove(event.getPlayer().getUniqueId());
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/aim/AimConsistent.java b/common/src/main/java/ac/grim/grimac/checks/impl/aim/AimConsistent.java
+new file mode 100644
+index 0000000..4fc4082
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/aim/AimConsistent.java
+@@ -0,0 +1,59 @@
++package ac.grim.grimac.checks.impl.aim;
++
++import ac.grim.grimac.checks.Check;
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.checks.type.PacketReceiveListener;
++import ac.grim.grimac.checks.type.RotationListener;
++import ac.grim.grimac.player.GrimPlayer;
++import ac.grim.grimac.utils.anticheat.AttackPackets;
++import ac.grim.grimac.utils.math.GrimMath;
++import ac.grim.grimac.utils.anticheat.update.RotationUpdate;
++import com.github.retrooper.packetevents.event.PacketReceiveEvent;
++
++import java.util.ArrayList;
++import java.util.List;
++
++@CheckData(name = "AimConsistent", stableKey = "grom.aim.consistent_speed", setback = 0, description = "Consistent Speed Rotation(Rhys Inspiration)")
++public class AimConsistent extends Check implements RotationListener, PacketReceiveListener {
++
++    private final List<Double> deltaYawList = new ArrayList<>();
++    private double buffer;
++    private long lastAttackTime;
++
++    public AimConsistent(GrimPlayer playerData) {
++        super(playerData);
++    }
++
++    @Override
++    public void onPacketReceive(PacketReceiveEvent event) {
++        final int attackedEntityId = AttackPackets.attackedEntityId(event);
++        if (attackedEntityId != AttackPackets.NOT_AN_ATTACK) {
++            lastAttackTime = System.currentTimeMillis();
++        }
++    }
++
++    @Override
++    public void process(final RotationUpdate rotationUpdate) {
++        if (System.currentTimeMillis() - lastAttackTime > 500) return;
++
++        double deltaYaw = (double) rotationUpdate.deltaYawABS();
++
++        if (deltaYaw > 1.0) {
++            deltaYawList.add(deltaYaw);
++
++            if (deltaYawList.size() >= 25) {
++                double std = GrimMath.calculateSD(deltaYawList);
++
++                if (std < 0.02) {
++                    if (++buffer > 3) {
++                        flagAndAlert("std=" + String.format("%.4f", std));
++                    }
++                } else {
++                    buffer = Math.max(0, buffer - 1.0);
++                }
++
++                deltaYawList.clear();
++            }
++        }
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/aim/AimConstant.java b/common/src/main/java/ac/grim/grimac/checks/impl/aim/AimConstant.java
+new file mode 100644
+index 0000000..a359867
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/aim/AimConstant.java
+@@ -0,0 +1,39 @@
++package ac.grim.grimac.checks.impl.aim;
++
++import ac.grim.grimac.checks.Check;
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.checks.type.PacketReceiveListener;
++import ac.grim.grimac.checks.type.RotationListener;
++import ac.grim.grimac.player.GrimPlayer;
++import ac.grim.grimac.utils.anticheat.AttackPackets;
++import ac.grim.grimac.utils.anticheat.update.RotationUpdate;
++import com.github.retrooper.packetevents.event.PacketReceiveEvent;
++
++@CheckData(name = "AimConstant", stableKey = "grom.aim.constant_speed", setback = 0, description = "Constant Speed (Rhys Inspiration)")
++public class AimConstant extends Check implements RotationListener, PacketReceiveListener {
++    private float lastDeltaYaw;
++    private double buffer;
++    private long lastAttackTime;
++
++    public AimConstant(GrimPlayer playerData) {
++        super(playerData);
++    }
++
++    @Override
++    public void onPacketReceive(PacketReceiveEvent event) {
++        final int attackedEntityId = AttackPackets.attackedEntityId(event);
++        if (attackedEntityId != AttackPackets.NOT_AN_ATTACK) {
++            lastAttackTime = System.currentTimeMillis();
++        }
++    }
++
++    @Override
++    public void process(final RotationUpdate rotationUpdate) {
++        if (System.currentTimeMillis() - lastAttackTime > 200) return;
++        float deltaYaw = rotationUpdate.deltaYawABS();
++        if (deltaYaw > 1.0f && deltaYaw == lastDeltaYaw) {
++            if (++buffer > 5) flagAndAlert("speed=" + deltaYaw);
++        } else buffer = Math.max(0, buffer - 0.5);
++        lastDeltaYaw = deltaYaw;
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/aim/AimGCD.java b/common/src/main/java/ac/grim/grimac/checks/impl/aim/AimGCD.java
+new file mode 100644
+index 0000000..69e2162
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/aim/AimGCD.java
+@@ -0,0 +1,99 @@
++package ac.grim.grimac.checks.impl.aim;
++
++import ac.grim.grimac.checks.Check;
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.checks.impl.aim.processor.AimProcessor;
++import ac.grim.grimac.checks.type.RotationListener;
++import ac.grim.grimac.player.GrimPlayer;
++import ac.grim.grimac.utils.anticheat.update.RotationUpdate;
++
++import java.util.ArrayDeque;
++import java.util.Deque;
++
++@CheckData(name = "AimGCD", stableKey = "grom.aim.gcd_grid", setback = 0, description = "AimGCD(Kauri Inspiration)")
++public class AimGCD extends Check implements RotationListener {
++
++    private float buffer;
++    private long lastGridTime;
++
++
++    private final Deque<Double> recentDivisors = new ArrayDeque<>();
++    private static final int MAX_SAMPLES = 45;
++
++    public AimGCD(GrimPlayer playerData) {
++        super(playerData);
++        this.lastGridTime = System.currentTimeMillis();
++    }
++
++    @Override
++    public void process(final RotationUpdate rotationUpdate) {
++
++        if (rotationUpdate.deltaYaw() == 0 && rotationUpdate.deltaPitch() == 0) return;
++
++        AimProcessor processor = player.checkManager.get(AimProcessor.class);
++        if (processor == null) return;
++
++
++
++        double currentDivisor = processor.divisorPitch;
++
++
++        if (currentDivisor < 0.009) {
++            lastGridTime = System.currentTimeMillis();
++        }
++
++
++        recentDivisors.add(currentDivisor);
++        if (recentDivisors.size() > MAX_SAMPLES) {
++            recentDivisors.removeFirst();
++        }
++
++
++        if (recentDivisors.size() < 40) return;
++
++        int suspiciousCount = 0;
++        double min = 100.0, max = -100.0;
++
++        for (Double val : recentDivisors) {
++
++            if (val < 0.007 && val > 1e-5) {
++                suspiciousCount++;
++                if (val < min) min = val;
++                if (val > max) max = val;
++            }
++        }
++
++
++        double variation = max - min;
++
++
++
++        boolean lastGridPassed = (System.currentTimeMillis() - lastGridTime) > 150;
++        final float deltaPitch = Math.abs(rotationUpdate.deltaPitch());
++        final float deltaYaw = Math.abs(rotationUpdate.deltaYaw());
++
++
++        boolean isSignificantMovement = deltaPitch > 0.15 || deltaYaw > 0.15;
++
++
++        if (suspiciousCount > 40
++                && lastGridPassed
++                && variation < 0.005
++                && isSignificantMovement) {
++
++
++            if (deltaPitch > 0.15 && deltaPitch < 20) {
++                buffer++;
++
++
++
++                if (buffer > 8) {
++                    flagAndAlert("gcd=" + String.format("%.5f", currentDivisor));
++                }
++            }
++        } else {
++
++            buffer = Math.max(0, buffer - 0.75f);
++        }
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/aim/AimIR.java b/common/src/main/java/ac/grim/grimac/checks/impl/aim/AimIR.java
+new file mode 100644
+index 0000000..21b575c
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/aim/AimIR.java
+@@ -0,0 +1,47 @@
++package ac.grim.grimac.checks.impl.aim;
++
++import ac.grim.grimac.checks.Check;
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.checks.type.PacketReceiveListener;
++import ac.grim.grimac.checks.type.RotationListener;
++import ac.grim.grimac.player.GrimPlayer;
++import ac.grim.grimac.utils.anticheat.AttackPackets;
++import ac.grim.grimac.utils.anticheat.update.RotationUpdate;
++import com.github.retrooper.packetevents.event.PacketReceiveEvent;
++
++@CheckData(name = "AimIR", stableKey = "grom.aim.identical_rotation", setback = 0, description = "Identical Rotation (Artemis Inspiration)")
++public class AimIR extends Check implements RotationListener, PacketReceiveListener {
++    private float lastYawDelta;
++    private double streak, lastAttack;
++
++    public AimIR(GrimPlayer playerData) {
++        super(playerData);
++    }
++
++    @Override
++    public void onPacketReceive(PacketReceiveEvent event) {
++        final int attackedEntityId = AttackPackets.attackedEntityId(event);
++        if (attackedEntityId != AttackPackets.NOT_AN_ATTACK) {
++            lastAttack = System.currentTimeMillis();
++        }
++    }
++
++    @Override
++    public void process(final RotationUpdate rotationUpdate) {
++        if (System.currentTimeMillis() - lastAttack > 2000 || player.packetStateData.lastPacketWasTeleport) {
++            streak = 0; return;
++        }
++        float yawDelta = rotationUpdate.deltaYawABS();
++        float pitchDelta = rotationUpdate.deltaPitchABS();
++
++        if (yawDelta > 0.0f && pitchDelta > 0.0f) {
++            int roundedYaw = Math.round(yawDelta);
++            if (roundedYaw == Math.round(lastYawDelta) && yawDelta > 1.5f && Math.abs(yawDelta - lastYawDelta) > 0.001f && pitchDelta > 0.5f) {
++                if (++streak > 6) flagAndAlert("streak=" + (int)streak);
++            } else {
++                streak = Math.max(0, streak - 0.25);
++            }
++        }
++        this.lastYawDelta = yawDelta;
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/aim/AimRounding.java b/common/src/main/java/ac/grim/grimac/checks/impl/aim/AimRounding.java
+new file mode 100644
+index 0000000..a0dec98
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/aim/AimRounding.java
+@@ -0,0 +1,26 @@
++package ac.grim.grimac.checks.impl.aim;
++
++import ac.grim.grimac.checks.Check;
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.checks.type.RotationListener;
++import ac.grim.grimac.player.GrimPlayer;
++import ac.grim.grimac.utils.anticheat.update.RotationUpdate;
++
++@CheckData(name = "AimRounding", stableKey = "grom.aim.rounded_pitch", setback = 0, description = "GCD Rounding (Kauri Inspiration)")
++public class AimRounding extends Check implements RotationListener {
++    private double buffer;
++
++    public AimRounding(GrimPlayer playerData) {
++        super(playerData);
++    }
++
++    @Override
++    public void process(final RotationUpdate rotationUpdate) {
++        float deltaPitch = rotationUpdate.deltaPitchABS();
++        if (deltaPitch < 0.5f) return;
++        boolean rounded = (deltaPitch % 0.1f == 0) || (deltaPitch % 0.05f == 0) || (deltaPitch % 1.0f == 0);
++        if (rounded) {
++            if (++buffer > 10) flagAndAlert("dp=" + deltaPitch);
++        } else buffer = Math.max(0, buffer - 0.25);
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/aim/AimSnap.java b/common/src/main/java/ac/grim/grimac/checks/impl/aim/AimSnap.java
+new file mode 100644
+index 0000000..9ddb447
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/aim/AimSnap.java
+@@ -0,0 +1,49 @@
++package ac.grim.grimac.checks.impl.aim;
++
++import ac.grim.grimac.checks.Check;
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.checks.impl.aim.processor.AimProcessor;
++import ac.grim.grimac.checks.type.RotationListener;
++import ac.grim.grimac.player.GrimPlayer;
++import ac.grim.grimac.utils.anticheat.update.RotationUpdate;
++
++@CheckData(name = "AimSnap", stableKey = "grom.aim.snap", setback = 0, description = "AimSnap(Kauri Inspiration)")
++public class AimSnap extends Check implements RotationListener {
++
++    private float buffer;
++    private float lastDeltaYaw;
++
++    public AimSnap(GrimPlayer playerData) {
++        super(playerData);
++    }
++
++    @Override
++    public void process(final RotationUpdate rotationUpdate) {
++        if (rotationUpdate.deltaYaw() == 0 && rotationUpdate.deltaPitch() == 0) return;
++
++        float toYaw = player.yaw;
++        float deltaYaw = Math.abs(rotationUpdate.deltaYaw());
++
++        AimProcessor processor = player.checkManager.get(AimProcessor.class);
++        if (processor == null) return;
++
++
++
++        if (deltaYaw > 320
++                && lastDeltaYaw > 0
++                && lastDeltaYaw < 30
++                && toYaw < 360 && toYaw > -360
++                && !player.packetStateData.lastPacketWasTeleport
++                && processor.sensitivityYaw < 0.65) {
++
++
++            if (++buffer > 1) {
++                flagAndAlert(String.format("yaw=%.3f", deltaYaw));
++            }
++        } else if (buffer > 0) {
++            buffer -= 0.005f;
++        }
++
++        lastDeltaYaw = deltaYaw;
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/breaking/WrongBreak.java b/common/src/main/java/ac/grim/grimac/checks/impl/breaking/WrongBreak.java
+index 1952438..6f7b93a 100644
+--- a/common/src/main/java/ac/grim/grimac/checks/impl/breaking/WrongBreak.java
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/breaking/WrongBreak.java
+@@ -13,6 +13,7 @@ import com.github.retrooper.packetevents.manager.server.ServerVersion;
+ import com.github.retrooper.packetevents.protocol.player.ClientVersion;
+ import com.github.retrooper.packetevents.protocol.player.DiggingAction;
+ import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
++import com.github.retrooper.packetevents.protocol.world.states.type.StateTypes;
+ import com.github.retrooper.packetevents.util.Vector3i;
+ 
+ @CheckData(name = "WrongBreak", stableKey = "grim.breaking.wrong_break", description = "Sent block break progress for a different block than the one being mined")
+@@ -85,7 +86,9 @@ public class WrongBreak extends Check implements BlockBreakListener {
+             final Vector3i pos = blockBreak.position;
+ 
+             // when a player looks away from the mined block, they send a cancel, and if they look at it again, they don't send another start. (thanks mojang!)
+-            if (!pos.equals(lastCancelledBlock) && (!lastBlockWasInstantBreak || player.getClientVersion().isOlderThan(ClientVersion.V_1_14_4)) && !pos.equals(lastBlock)) {
++            // A cobweb that can't be broken instantly must not inherit the exemption from a previously insta-broken block (FastWeb)
++            if (!pos.equals(lastCancelledBlock) && (!lastBlockWasInstantBreak || player.getClientVersion().isOlderThan(ClientVersion.V_1_14_4)
++                    || blockBreak.block.getType() == StateTypes.COBWEB && !BlockBreakSpeed.couldInstantlyBreakBlock(player, StateTypes.COBWEB)) && !pos.equals(lastBlock)) {
+                 var buf = V.write(verbose()).uint(VerboseCodecs.enumId(DiggingAction.FINISHED_DIGGING))
+                         .bool(lastBlock != null)
+                         .mcPos(lastBlock == null ? 0 : lastBlock.x, lastBlock == null ? 0 : lastBlock.y, lastBlock == null ? 0 : lastBlock.z)
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerA.java b/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerA.java
+new file mode 100644
+index 0000000..6125bfa
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerA.java
+@@ -0,0 +1,51 @@
++package ac.grim.grimac.checks.impl.combat;
++
++import ac.grim.grimac.checks.Check;
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.checks.type.PacketReceiveListener;
++import ac.grim.grimac.player.GrimPlayer;
++import com.github.retrooper.packetevents.event.PacketReceiveEvent;
++import com.github.retrooper.packetevents.protocol.player.DiggingAction;
++import com.github.retrooper.packetevents.protocol.player.InteractionHand;
++import com.github.retrooper.packetevents.protocol.packettype.PacketType;
++import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientAnimation;
++import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerDigging;
++import org.jetbrains.annotations.NotNull;
++
++@CheckData(name = "AutoClickerA", stableKey = "grom.autoclicker.cps_limit", setback = 10, description = "Cps Limiter(Kauri Inspiration)")
++public class AutoclickerA extends Check implements PacketReceiveListener {
++
++    private int flyingTicks = 0;
++    private int cps = 0;
++    private boolean isDigging = false;
++
++    public AutoclickerA(@NotNull GrimPlayer player) {
++        super(player);
++    }
++
++    @Override
++    public void onPacketReceive(PacketReceiveEvent event) {
++        if (event.getPacketType() == PacketType.Play.Client.PLAYER_DIGGING) {
++            WrapperPlayClientPlayerDigging dig = new WrapperPlayClientPlayerDigging(event);
++            if (dig.getAction() == DiggingAction.START_DIGGING) isDigging = true;
++            else if (dig.getAction() == DiggingAction.CANCELLED_DIGGING ||
++                    dig.getAction() == DiggingAction.FINISHED_DIGGING) isDigging = false;
++        }
++
++        if (event.getPacketType() == PacketType.Play.Client.ANIMATION) {
++            WrapperPlayClientAnimation wrapper = new WrapperPlayClientAnimation(event);
++            if (wrapper.getHand() == InteractionHand.MAIN_HAND && !isDigging) {
++                cps++;
++            }
++        }
++
++        if (isUpdate(event.getPacketType())) {
++            flyingTicks++;
++            if (flyingTicks >= 20) {
++                if (cps > 25) this.flagAndAlert("cps=" + cps);
++                cps = 0;
++                flyingTicks = 0;
++            }
++        }
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerB.java b/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerB.java
+new file mode 100644
+index 0000000..1385397
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerB.java
+@@ -0,0 +1,79 @@
++package ac.grim.grimac.checks.impl.combat;
++
++import ac.grim.grimac.checks.Check;
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.checks.type.PacketReceiveListener;
++import ac.grim.grimac.player.GrimPlayer;
++import com.github.retrooper.packetevents.event.PacketReceiveEvent;
++import com.github.retrooper.packetevents.protocol.player.DiggingAction;
++import com.github.retrooper.packetevents.protocol.player.InteractionHand;
++import com.github.retrooper.packetevents.protocol.packettype.PacketType;
++import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientAnimation;
++import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerDigging;
++import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerFlying;
++import org.jetbrains.annotations.NotNull;
++
++@CheckData(name = "AutoClickerB", stableKey = "grom.autoclicker.packet_sync", experimental = true, setback = 10, description = "Packet Sync(Kauri Inspiration)")
++public class AutoclickerB extends Check implements PacketReceiveListener {
++
++    private long lastFlyingTime = 0;
++    private long lastRightClickTime = 0;
++    private double buffer = 0;
++    private boolean isDigging = false;
++
++    public AutoclickerB(@NotNull GrimPlayer player) {
++        super(player);
++    }
++
++    @Override
++    public void onPacketReceive(PacketReceiveEvent event) {
++
++        if (event.getPacketType() == PacketType.Play.Client.PLAYER_DIGGING) {
++            WrapperPlayClientPlayerDigging dig = new WrapperPlayClientPlayerDigging(event);
++            if (dig.getAction() == DiggingAction.START_DIGGING) {
++                isDigging = true;
++            } else if (dig.getAction() == DiggingAction.CANCELLED_DIGGING ||
++                    dig.getAction() == DiggingAction.FINISHED_DIGGING) {
++                isDigging = false;
++            }
++        }
++
++
++        if (event.getPacketType() == PacketType.Play.Client.PLAYER_BLOCK_PLACEMENT
++                || event.getPacketType() == PacketType.Play.Client.USE_ITEM) {
++            this.lastRightClickTime = System.currentTimeMillis();
++        }
++
++
++        if (WrapperPlayClientPlayerFlying.isFlying(event.getPacketType())) {
++            if (!player.getSetbackTeleportUtil().shouldBlockMovement()) {
++                this.lastFlyingTime = event.getTimestamp();
++            }
++        }
++
++
++        if (event.getPacketType() == PacketType.Play.Client.ANIMATION) {
++            WrapperPlayClientAnimation wrapper = new WrapperPlayClientAnimation(event);
++            if (wrapper.getHand() != InteractionHand.MAIN_HAND) return;
++
++
++            if (System.currentTimeMillis() - lastRightClickTime < 50) return;
++
++
++            if (isDigging) {
++                buffer = Math.max(0, buffer - 0.5);
++                return;
++            }
++
++            long delta = event.getTimestamp() - lastFlyingTime;
++
++            if (delta < 10) {
++                if (++buffer > 4) {
++                    flagAndAlert("delta=" + delta + "ms");
++                }
++            } else {
++                buffer = Math.max(0, buffer - 0.25);
++            }
++        }
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerC.java b/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerC.java
+new file mode 100644
+index 0000000..62179e7
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerC.java
+@@ -0,0 +1,74 @@
++package ac.grim.grimac.checks.impl.combat;
++
++import ac.grim.grimac.checks.Check;
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.checks.type.PacketReceiveListener;
++import ac.grim.grimac.player.GrimPlayer;
++import com.github.retrooper.packetevents.event.PacketReceiveEvent;
++import com.github.retrooper.packetevents.protocol.player.DiggingAction;
++import com.github.retrooper.packetevents.protocol.player.InteractionHand;
++import com.github.retrooper.packetevents.protocol.packettype.PacketType;
++import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientAnimation;
++import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerDigging;
++import org.jetbrains.annotations.NotNull;
++import java.util.ArrayDeque;
++import java.util.Deque;
++
++@CheckData(name = "AutoClickerC", stableKey = "grom.autoclicker.tick_variation", setback = 10, description = "Tick Variation(Kauri Inspiration)")
++public class AutoclickerC extends Check implements PacketReceiveListener {
++
++    private int lastClickTick = 0;
++    private int localTick = 0;
++    private float buffer = 0;
++    private boolean isDigging = false;
++    private final Deque<Integer> tickDeltas = new ArrayDeque<>();
++
++    public AutoclickerC(@NotNull GrimPlayer player) {
++        super(player);
++    }
++
++    @Override
++    public void onPacketReceive(PacketReceiveEvent event) {
++        if (event.getPacketType() == PacketType.Play.Client.PLAYER_DIGGING) {
++            WrapperPlayClientPlayerDigging dig = new WrapperPlayClientPlayerDigging(event);
++            if (dig.getAction() == DiggingAction.START_DIGGING) isDigging = true;
++            else if (dig.getAction() == DiggingAction.CANCELLED_DIGGING ||
++                    dig.getAction() == DiggingAction.FINISHED_DIGGING) isDigging = false;
++        }
++
++        if (isUpdate(event.getPacketType())) {
++            localTick++;
++        }
++
++        if (event.getPacketType() == PacketType.Play.Client.ANIMATION) {
++            WrapperPlayClientAnimation wrapper = new WrapperPlayClientAnimation(event);
++            if (isDigging || wrapper.getHand() != InteractionHand.MAIN_HAND) return;
++
++            int currentTick = localTick;
++            int delta = currentTick - lastClickTick;
++
++            if (lastClickTick != 0 && delta < 100) {
++                tickDeltas.add(delta);
++                if (tickDeltas.size() > 30) tickDeltas.removeFirst();
++
++                if (tickDeltas.size() > 8) {
++                    int max = -1000, min = 1000;
++                    double average = 0;
++                    for (int d : tickDeltas) {
++                        max = Math.max(d, max);
++                        min = Math.min(d, min);
++                        average += d;
++                    }
++                    average /= tickDeltas.size();
++                    int range = max - min;
++                    if (average < 3.0 && range <= 1) {
++                        if (++buffer > 12) this.flagAndAlert("range=" + range);
++                    } else {
++                        buffer = Math.max(0, buffer - 0.5f);
++                    }
++                }
++            }
++            lastClickTick = currentTick;
++        }
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerD.java b/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerD.java
+new file mode 100644
+index 0000000..5b0731d
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerD.java
+@@ -0,0 +1,71 @@
++package ac.grim.grimac.checks.impl.combat;
++
++import ac.grim.grimac.checks.Check;
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.checks.type.PacketReceiveListener;
++import ac.grim.grimac.player.GrimPlayer;
++import com.github.retrooper.packetevents.event.PacketReceiveEvent;
++import com.github.retrooper.packetevents.protocol.packettype.PacketType;
++import com.github.retrooper.packetevents.protocol.player.ClientVersion;
++import com.github.retrooper.packetevents.protocol.player.DiggingAction;
++import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerBlockPlacement;
++import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerDigging;
++import org.jetbrains.annotations.NotNull;
++
++@CheckData(name = "AutoClickerD", stableKey = "grom.autoclicker.autoblock_sync", setback = 15, description = "Auto-Block Sync(Kauri Inspiration)")
++public class AutoclickerD extends Check implements PacketReceiveListener {
++
++    private long lastArmTime = 0;
++    private double currentCps = 0;
++    private boolean swordBlocked = false;
++    private int armTicks = 0;
++    private double verbose = 0;
++    private boolean isDigging = false;
++
++    public AutoclickerD(@NotNull GrimPlayer player) {
++        super(player);
++    }
++
++    @Override
++    public void onPacketReceive(PacketReceiveEvent event) {
++        if (player.getClientVersion().isNewerThan(ClientVersion.V_1_8)) return;
++
++        if (event.getPacketType() == PacketType.Play.Client.PLAYER_DIGGING) {
++            WrapperPlayClientPlayerDigging dig = new WrapperPlayClientPlayerDigging(event);
++            if (dig.getAction() == DiggingAction.START_DIGGING) isDigging = true;
++            else if (dig.getAction() == DiggingAction.CANCELLED_DIGGING ||
++                    dig.getAction() == DiggingAction.FINISHED_DIGGING) isDigging = false;
++        }
++
++        if (event.getPacketType() == PacketType.Play.Client.ANIMATION) {
++            if (isDigging) return;
++            long now = event.getTimestamp();
++            if (lastArmTime != 0) currentCps = 1000.0 / (now - lastArmTime);
++            lastArmTime = now;
++            armTicks++;
++        }
++
++        if (event.getPacketType() == PacketType.Play.Client.PLAYER_BLOCK_PLACEMENT) {
++            WrapperPlayClientPlayerBlockPlacement placement = new WrapperPlayClientPlayerBlockPlacement(event);
++
++            if (placement.getItemStack().isPresent()) {
++                if (placement.getItemStack().get().getType().getName().getKey().contains("sword")) {
++                    swordBlocked = true;
++                }
++            }
++        }
++
++        if (isUpdate(event.getPacketType())) {
++            if (swordBlocked && armTicks > 0) {
++                if (armTicks == 1 && currentCps > 3.0) {
++                    if (currentCps > 7.0) verbose++;
++                    if (verbose > 15) this.flagAndAlert("cps=" + (int)currentCps);
++                } else {
++                    verbose = Math.max(0, verbose - 20);
++                }
++            }
++            swordBlocked = false;
++            armTicks = 0;
++        }
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerE.java b/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerE.java
+new file mode 100644
+index 0000000..9ff1c19
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerE.java
+@@ -0,0 +1,66 @@
++package ac.grim.grimac.checks.impl.combat;
++
++import ac.grim.grimac.checks.Check;
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.checks.type.PacketReceiveListener;
++import ac.grim.grimac.player.GrimPlayer;
++import com.github.retrooper.packetevents.event.PacketReceiveEvent;
++import com.github.retrooper.packetevents.protocol.player.DiggingAction;
++import com.github.retrooper.packetevents.protocol.player.InteractionHand;
++import com.github.retrooper.packetevents.protocol.packettype.PacketType;
++import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientAnimation;
++import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerDigging;
++
++import java.util.*;
++
++@CheckData(name = "AutoClickerE", stableKey = "grom.autoclicker.low_entropy", setback = 0, description = "Low Entropy (Rhys Inspiration)")
++public class AutoclickerE extends Check implements PacketReceiveListener {
++    private final List<Integer> intervals = new ArrayList<>();
++    private int ticksSinceLastClick, buffer;
++    private boolean isDigging;
++    private long lastRightClickTime;
++
++    public AutoclickerE(GrimPlayer player) {
++        super(player);
++    }
++
++    @Override
++    public void onPacketReceive(PacketReceiveEvent event) {
++
++        if (event.getPacketType() == PacketType.Play.Client.PLAYER_DIGGING) {
++            WrapperPlayClientPlayerDigging d = new WrapperPlayClientPlayerDigging(event);
++            if (d.getAction() == DiggingAction.START_DIGGING) isDigging = true;
++            else if (d.getAction() == DiggingAction.CANCELLED_DIGGING || d.getAction() == DiggingAction.FINISHED_DIGGING) isDigging = false;
++        }
++
++
++        if (event.getPacketType() == PacketType.Play.Client.PLAYER_BLOCK_PLACEMENT
++                || event.getPacketType() == PacketType.Play.Client.USE_ITEM) {
++            this.lastRightClickTime = System.currentTimeMillis();
++        }
++
++        if (isUpdate(event.getPacketType())) ticksSinceLastClick++;
++
++        if (event.getPacketType() == PacketType.Play.Client.ANIMATION) {
++            WrapperPlayClientAnimation w = new WrapperPlayClientAnimation(event);
++
++
++            if (w.getHand() != InteractionHand.MAIN_HAND || isDigging || (System.currentTimeMillis() - lastRightClickTime < 50)) {
++                return;
++            }
++
++            if (ticksSinceLastClick < 10) {
++                intervals.add(ticksSinceLastClick);
++                if (intervals.size() >= 60) {
++                    int unique = new HashSet<>(intervals).size();
++                    if (unique <= 4) {
++                        if (++buffer > 2) flagAndAlert("unique=" + unique);
++                    }
++                    else buffer = Math.max(0, buffer / 2);
++                    intervals.clear();
++                }
++            }
++            ticksSinceLastClick = 0;
++        }
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerF.java b/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerF.java
+new file mode 100644
+index 0000000..b5675ce
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerF.java
+@@ -0,0 +1,42 @@
++package ac.grim.grimac.checks.impl.combat;
++
++import ac.grim.grimac.checks.Check;
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.checks.type.PacketReceiveListener;
++import ac.grim.grimac.player.GrimPlayer;
++import com.github.retrooper.packetevents.event.PacketReceiveEvent;
++import com.github.retrooper.packetevents.protocol.packettype.PacketType;
++import java.util.ArrayList;
++import java.util.List;
++
++@CheckData(name = "AutoClickerF", stableKey = "grom.autoclicker.identical_stats", setback = 0, description = "Statistical Identity (Artemis Inspiration)")
++public class AutoclickerF extends Check implements PacketReceiveListener {
++    private final List<Double> samples = new ArrayList<>();
++    private double lastAverage, lastStdDev;
++    private int ticks;
++    private double buffer;
++
++    public AutoclickerF(GrimPlayer player) {
++        super(player);
++    }
++
++    @Override
++    public void onPacketReceive(PacketReceiveEvent event) {
++        if (isUpdate(event.getPacketType())) ticks++;
++        if (event.getPacketType() == PacketType.Play.Client.ANIMATION) {
++            if (ticks < 10) {
++                samples.add((double) ticks);
++                if (samples.size() >= 10) {
++                    double avg = samples.stream().mapToDouble(d -> d).average().orElse(0);
++                    double std = Math.sqrt(samples.stream().mapToDouble(d -> Math.pow(d - avg, 2)).sum() / 10);
++                    if (avg == lastAverage && std == lastStdDev && std > 0) {
++                        if (++buffer > 2) flagAndAlert("Identical Stats");
++                    } else buffer = Math.max(0, buffer - 0.5);
++                    lastAverage = avg; lastStdDev = std;
++                    samples.clear();
++                }
++            }
++            ticks = 0;
++        }
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerG.java b/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerG.java
+new file mode 100644
+index 0000000..e5cbeaa
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/combat/AutoclickerG.java
+@@ -0,0 +1,159 @@
++package ac.grim.grimac.checks.impl.combat;
++
++import ac.grim.grimac.checks.Check;
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.checks.type.PacketReceiveListener;
++import ac.grim.grimac.player.GrimPlayer;
++import ac.grim.grimac.utils.anticheat.AttackPackets;
++import com.github.retrooper.packetevents.event.PacketReceiveEvent;
++import com.github.retrooper.packetevents.protocol.player.DiggingAction;
++import com.github.retrooper.packetevents.protocol.player.InteractionHand;
++import com.github.retrooper.packetevents.protocol.packettype.PacketType;
++import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientAnimation;
++import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerDigging;
++
++import java.util.*;
++
++@CheckData(name = "AutoClickerG", stableKey = "grom.autoclicker.distribution", setback = 0, description = "Click interval distribution and burst analysis")
++public class AutoclickerG extends Check implements PacketReceiveListener {
++
++    // Listas internas que substituem o EvictingQueue
++    private final Deque<Long> intervals = new ArrayDeque<>();
++    private final Deque<Integer> burstLengths = new ArrayDeque<>();
++    private final Deque<Double> distributionScores = new ArrayDeque<>();
++
++    private long lastSwingTime = -1L;
++    private long lastAttackTime = 0L;
++    private long burstStartTime = -1L;
++    private int currentBurstCount = 0;
++    private boolean isDigging = false;
++
++    // Buffers de deteção
++    private double burstBuffer = 0.0;
++    private double distributionBuffer = 0.0;
++    private double totalBuffer = 0.0;
++
++    public AutoclickerG(GrimPlayer player) {
++        super(player);
++    }
++
++    @Override
++    public void onPacketReceive(PacketReceiveEvent event) {
++        // 1. Rastreio de Mineração
++        if (event.getPacketType() == PacketType.Play.Client.PLAYER_DIGGING) {
++            WrapperPlayClientPlayerDigging dig = new WrapperPlayClientPlayerDigging(event);
++            if (dig.getAction() == DiggingAction.START_DIGGING) isDigging = true;
++            else if (dig.getAction() == DiggingAction.CANCELLED_DIGGING ||
++                    dig.getAction() == DiggingAction.FINISHED_DIGGING) isDigging = false;
++            return;
++        }
++
++        // 2. Rastreio de Ataque (Independente do core do Grim)
++        final int attackedEntityId = AttackPackets.attackedEntityId(event);
++        if (attackedEntityId != AttackPackets.NOT_AN_ATTACK) {
++            lastAttackTime = System.currentTimeMillis();
++        }
++
++        // 3. Processamento de Cliques
++        if (event.getPacketType() == PacketType.Play.Client.ANIMATION) {
++            WrapperPlayClientAnimation wrapper = new WrapperPlayClientAnimation(event);
++            if (wrapper.getHand() != InteractionHand.MAIN_HAND || isDigging) return;
++
++            // Ignora se não atacou recentemente (foco em combate)
++            if (System.currentTimeMillis() - lastAttackTime > 500) return;
++
++            long now = System.currentTimeMillis();
++            if (lastSwingTime != -1L) {
++                long interval = now - lastSwingTime;
++
++                if (interval >= 20 && interval <= 1000) {
++                    addInterval(interval);
++                    analyzeBurst(interval, now);
++
++                    if (intervals.size() >= 10) {
++                        analyzeDistribution();
++                    }
++                }
++            }
++            lastSwingTime = now;
++
++            // Quando a amostra está cheia (40 cliques), faz a análise final
++            if (intervals.size() >= 40) {
++                performFinalAnalysis();
++                intervals.clear();
++                burstLengths.clear();
++                distributionScores.clear();
++            }
++        }
++    }
++
++    private void addInterval(long interval) {
++        intervals.add(interval);
++        if (intervals.size() > 40) intervals.removeFirst();
++    }
++
++    private void analyzeBurst(long interval, long currentTime) {
++        if (interval <= 100) {
++            if (currentBurstCount == 0) burstStartTime = currentTime;
++            currentBurstCount++;
++        } else {
++            if (currentBurstCount >= 3) {
++                burstLengths.add(currentBurstCount);
++                if (burstLengths.size() > 20) burstLengths.removeFirst();
++            }
++            currentBurstCount = 0;
++        }
++    }
++
++    private void analyzeDistribution() {
++        double sum = 0;
++        for (long val : intervals) sum += val;
++        double mean = sum / intervals.size();
++
++        // Teste de Wald-Wolfowitz para aleatoriedade
++        double runs = 1;
++        Double lastVal = null;
++        for (long val : intervals) {
++            double normalized = val / mean;
++            if (lastVal != null) {
++                if ((normalized > 1.0 && lastVal <= 1.0) || (normalized <= 1.0 && lastVal > 1.0)) {
++                    runs++;
++                }
++            }
++            lastVal = normalized;
++        }
++
++        int n = intervals.size();
++        double expectedRuns = (2.0 * n - 1.0) / 3.0;
++        double variance = (16.0 * n - 29.0) / 90.0;
++        if (variance > 0) {
++            double zScore = Math.abs((runs - expectedRuns) / Math.sqrt(variance));
++            distributionScores.add(zScore);
++            if (distributionScores.size() > 20) distributionScores.removeFirst();
++        }
++    }
++
++    private void performFinalAnalysis() {
++        // Analise de Bursts
++        if (!burstLengths.isEmpty()) {
++            double avgBurst = burstLengths.stream().mapToInt(i -> i).average().orElse(0);
++            if (avgBurst > 5.0) burstBuffer += (avgBurst - 5.0) * 0.3;
++        }
++        burstBuffer = Math.max(0, burstBuffer - 0.1);
++
++        // Analise de Z-Score (Deteção de "Falsa Bagunça")
++        if (!distributionScores.isEmpty()) {
++            double avgZ = distributionScores.stream().mapToDouble(d -> d).average().orElse(0);
++            // Z-Score < 1.5 indica que a aleatoriedade é artificialmente estável
++            if (avgZ < 1.5) distributionBuffer += (1.5 - avgZ) * 0.4;
++        }
++        distributionBuffer = Math.max(0, distributionBuffer - 0.1);
++
++        totalBuffer = burstBuffer + distributionBuffer;
++
++        if (totalBuffer > 6.0) {
++            flagAndAlert(String.format("total=%.1f zScore=%.1f", totalBuffer, distributionBuffer));
++            totalBuffer *= 0.6;
++        }
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/combat/killaura/AuraMovement.java b/common/src/main/java/ac/grim/grimac/checks/impl/combat/killaura/AuraMovement.java
+new file mode 100644
+index 0000000..24838b4
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/combat/killaura/AuraMovement.java
+@@ -0,0 +1,44 @@
++package ac.grim.grimac.checks.impl.combat.killaura;
++
++import ac.grim.grimac.checks.Check;
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.checks.type.PacketReceiveListener;
++import ac.grim.grimac.player.GrimPlayer;
++import ac.grim.grimac.utils.anticheat.AttackPackets;
++import com.github.retrooper.packetevents.event.PacketReceiveEvent;
++
++@CheckData(name = "AuraMovement", stableKey = "grom.killaura.linear_movement", setback = 0, description = "Detects linear stability (FlopAC Inspiration)")
++public class AuraMovement extends Check implements PacketReceiveListener {
++    private double lastYawDiff, lastDeltaXZ, buffer, lastAttackTime;
++
++    public AuraMovement(GrimPlayer player) {
++        super(player);
++    }
++
++    @Override
++    public void onPacketReceive(PacketReceiveEvent event) {
++        if (isUpdate(event.getPacketType())) {
++            if (System.currentTimeMillis() - lastAttackTime > 50) buffer = Math.max(0, buffer - 0.5);
++        }
++
++        if (AttackPackets.isAttack(event)) {
++
++            lastAttackTime = System.currentTimeMillis();
++            double currentYawDiff = player.yaw - player.lastYaw;
++            double yawAccel = Math.abs(currentYawDiff - this.lastYawDiff);
++            double currentDeltaXZ = Math.hypot(player.x - player.lastX, player.z - player.lastZ);
++            double speedAccel = Math.abs(currentDeltaXZ - lastDeltaXZ);
++
++            if (speedAccel > 0 && speedAccel < 0.008 && yawAccel > 7.0) {
++                if (++buffer > 6.0) {
++                    flagAndAlert(String.format("accel=%.5f", speedAccel));
++                    buffer = 4.0;
++                }
++            } else {
++                buffer = Math.max(0, buffer - 0.25);
++            }
++            this.lastDeltaXZ = currentDeltaXZ;
++            this.lastYawDiff = currentYawDiff;
++        }
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/combat/killaura/AuraPostSnap.java b/common/src/main/java/ac/grim/grimac/checks/impl/combat/killaura/AuraPostSnap.java
+new file mode 100644
+index 0000000..700a9ac
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/combat/killaura/AuraPostSnap.java
+@@ -0,0 +1,51 @@
++package ac.grim.grimac.checks.impl.combat.killaura;
++
++import ac.grim.grimac.checks.Check;
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.checks.type.PacketReceiveListener;
++import ac.grim.grimac.checks.type.RotationListener;
++import ac.grim.grimac.player.GrimPlayer;
++import ac.grim.grimac.utils.anticheat.AttackPackets;
++import ac.grim.grimac.utils.anticheat.update.RotationUpdate;
++import com.github.retrooper.packetevents.event.PacketReceiveEvent;
++
++@CheckData(name = "AuraHitSnap", stableKey = "grom.killaura.post_hit_snap", setback = 0, description = "Rotation Pos-Hit (LightAC Inspiration)")
++public class AuraPostSnap extends Check implements RotationListener, PacketReceiveListener {
++    private long lastStaticHitTime;
++    private double buffer;
++    private boolean lastPacketWasAttack;
++
++    public AuraPostSnap(GrimPlayer player) {
++        super(player);
++    }
++
++    @Override
++    public void onPacketReceive(PacketReceiveEvent event) {
++        final int attackedEntityId = AttackPackets.attackedEntityId(event);
++        if (attackedEntityId != AttackPackets.NOT_AN_ATTACK) {
++            lastPacketWasAttack = true;
++        }
++    }
++
++    @Override
++    public void process(final RotationUpdate rotationUpdate) {
++        long now = System.currentTimeMillis();
++        if (lastPacketWasAttack) {
++            if (rotationUpdate.deltaYawABS() < 0.1 && rotationUpdate.deltaPitchABS() < 0.1) lastStaticHitTime = now;
++            lastPacketWasAttack = false;
++            return;
++        }
++        long timeSinceHit = now - lastStaticHitTime;
++        if (timeSinceHit < 200 && lastStaticHitTime != 0) {
++            if (rotationUpdate.deltaYawABS() > 35.0) {
++                if (++buffer > 5) {
++                    flagAndAlert("snap=" + rotationUpdate.deltaYawABS());
++                    buffer = 3;
++                }
++                lastStaticHitTime = 0;
++            }
++        } else {
++            buffer = Math.max(0, buffer - 0.01);
++        }
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/combat/killaura/KACalc.java b/common/src/main/java/ac/grim/grimac/checks/impl/combat/killaura/KACalc.java
+new file mode 100644
+index 0000000..1c520f0
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/combat/killaura/KACalc.java
+@@ -0,0 +1,82 @@
++package ac.grim.grimac.checks.impl.combat.killaura;
++
++import ac.grim.grimac.checks.Check;
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.checks.type.PacketReceiveListener;
++import ac.grim.grimac.checks.type.RotationListener;
++import ac.grim.grimac.player.GrimPlayer;
++import ac.grim.grimac.utils.anticheat.AttackPackets;
++import ac.grim.grimac.utils.math.KauriMath;
++import ac.grim.grimac.utils.anticheat.update.RotationUpdate;
++import ac.grim.grimac.utils.collisions.datatypes.SimpleCollisionBox;
++import ac.grim.grimac.utils.data.packetentity.PacketEntity;
++import com.github.retrooper.packetevents.event.PacketReceiveEvent;
++
++import java.util.ArrayList;
++import java.util.List;
++
++@CheckData(name = "KillAuraCalc", stableKey = "grom.killaura.calc", setback = 0, description = "Aura Calc(Kauri Inspiration)")
++public class KACalc extends Check implements RotationListener, PacketReceiveListener {
++
++    private KAZero kaZero;
++
++    private final List<Double> YAW_OFFSET = new ArrayList<>();
++    private final List<Double> PITCH_OFFSET = new ArrayList<>();
++
++    private int targetId = -1;
++    private long lastAttackTime = 0;
++
++    public KACalc(GrimPlayer player) {
++        super(player);
++    }
++
++    @Override
++    public void onPacketReceive(PacketReceiveEvent event) {
++        final int attackedEntityId = AttackPackets.attackedEntityId(event);
++        if (attackedEntityId != AttackPackets.NOT_AN_ATTACK) {
++            this.targetId = attackedEntityId;
++            this.lastAttackTime = System.currentTimeMillis();
++        }
++    }
++
++    @Override
++    public void process(final RotationUpdate rotationUpdate) {
++        if (kaZero == null) kaZero = player.checkManager.get(KAZero.class);
++        if (kaZero == null) return;
++
++        if (System.currentTimeMillis() - lastAttackTime > 1000 || targetId == -1) return;
++
++        PacketEntity target = player.compensatedEntities.entityMap.get(targetId);
++        if (target == null) return;
++
++        SimpleCollisionBox box = target.getPossibleCollisionBoxes();
++        if (box == null) return;
++
++        double tX = (box.minX + box.maxX) / 2.0;
++        double tZ = (box.minZ + box.maxZ) / 2.0;
++
++        double entityHeight = box.maxY - box.minY;
++        double tY = box.minY + (entityHeight * 0.85);
++
++        double pX = player.x;
++        double pY = player.y + player.getEyeHeight();
++        double pZ = player.z;
++
++        float[] ideal = KauriMath.getRotation(pX, pY, pZ, tX, tY, tZ);
++
++        float yawOffset = KauriMath.getAngleDistance(player.yaw, ideal[0]);
++        float pitchOffset = KauriMath.getAngleDistance(player.pitch, ideal[1]);
++
++        YAW_OFFSET.add((double) yawOffset);
++        PITCH_OFFSET.add((double) pitchOffset);
++
++        if (YAW_OFFSET.size() > 10) YAW_OFFSET.remove(0);
++        if (PITCH_OFFSET.size() > 10) PITCH_OFFSET.remove(0);
++
++        if (YAW_OFFSET.size() >= 5) {
++            double[] offsetArr = {yawOffset, pitchOffset};
++
++            kaZero.runCheck(offsetArr);
++        }
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/combat/killaura/KAZero.java b/common/src/main/java/ac/grim/grimac/checks/impl/combat/killaura/KAZero.java
+new file mode 100644
+index 0000000..fdaf085
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/combat/killaura/KAZero.java
+@@ -0,0 +1,32 @@
++package ac.grim.grimac.checks.impl.combat.killaura;
++
++import ac.grim.grimac.checks.Check;
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.player.GrimPlayer;
++
++@CheckData(name = "KillAuraZero", stableKey = "grom.killaura.zero_offset", setback = 0, description = "(Offset 0.0)(Kauri Inspiration)")
++public class KAZero extends Check {
++
++    private int buffer;
++
++    public KAZero(GrimPlayer player) {
++        super(player);
++    }
++
++    /**
++     * @param offset Array de doubles onde:
++     *               offset[0] = Yaw Offset (Diferença horizontal)
++     *               offset[1] = Pitch Offset (Diferença vertical)
++     */
++    public void runCheck(double[] offset) {
++        // se o offset for "Zero" é um belissimo hack kkkkk
++
++        if (Math.abs(offset[0]) < 0.001) {
++            if (++buffer > 2) {
++                flagAndAlert(String.format("offset=%.5f", offset[0]));
++            }
++        } else {
++            buffer = 0;
++        }
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/scaffolding/ScaffoldDirection.java b/common/src/main/java/ac/grim/grimac/checks/impl/scaffolding/ScaffoldDirection.java
+new file mode 100644
+index 0000000..95b9f12
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/scaffolding/ScaffoldDirection.java
+@@ -0,0 +1,37 @@
++package ac.grim.grimac.checks.impl.scaffolding;
++
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.checks.type.BlockPlaceCheck;
++import ac.grim.grimac.checks.type.BlockPlaceListener;
++import ac.grim.grimac.player.GrimPlayer;
++import ac.grim.grimac.utils.anticheat.update.BlockPlace;
++import com.github.retrooper.packetevents.protocol.world.BlockFace;
++
++@CheckData(name = "ScaffoldDirection", stableKey = "grom.scaffold.direction", setback = 0, description = "Impossible Placement (Truthful Inspiration)")
++public class ScaffoldDirection extends BlockPlaceCheck implements BlockPlaceListener {
++    private double buffer;
++
++    public ScaffoldDirection(GrimPlayer player) {
++        super(player);
++    }
++
++    @Override
++    public void onBlockPlace(final BlockPlace place) {
++        if (!player.isSprinting || player.inVehicle()) {
++            buffer = Math.max(0, buffer - 0.25);
++            return;
++        }
++        BlockFace face = place.getFace();
++        if (face == null || face == BlockFace.UP || face == BlockFace.DOWN) return;
++
++        double vx = player.x - player.lastX;
++        double vz = player.z - player.lastZ;
++        double dot = (vx * face.getModX()) + (vz * face.getModZ());
++
++        if (dot > 0.15) {
++            if (++buffer > 5.0) flagAndAlert(String.format("dot=%.3f", dot));
++        } else {
++            buffer = Math.max(0, buffer - 0.25);
++        }
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/scaffolding/ScaffoldRatio.java b/common/src/main/java/ac/grim/grimac/checks/impl/scaffolding/ScaffoldRatio.java
+new file mode 100644
+index 0000000..dc8bbcd
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/scaffolding/ScaffoldRatio.java
+@@ -0,0 +1,57 @@
++package ac.grim.grimac.checks.impl.scaffolding;
++
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.checks.type.BlockPlaceCheck;
++import ac.grim.grimac.checks.type.BlockPlaceListener;
++import ac.grim.grimac.player.GrimPlayer;
++import ac.grim.grimac.utils.anticheat.update.BlockPlace;
++import com.github.retrooper.packetevents.protocol.player.GameMode;
++import com.github.retrooper.packetevents.protocol.world.states.type.StateTypes;
++import com.github.retrooper.packetevents.util.Vector3d;
++import com.github.retrooper.packetevents.util.Vector3i;
++
++@CheckData(name = "ScaffoldRatio", stableKey = "grom.scaffold.ratio", setback = 0, description = "SUS Block Placement(Kauri Inspiration)")
++public class ScaffoldRatio extends BlockPlaceCheck implements BlockPlaceListener {
++
++    public ScaffoldRatio(GrimPlayer player) {
++        super(player);
++    }
++
++    @Override
++    public void onBlockPlace(final BlockPlace place) {
++        if (player.gamemode == GameMode.CREATIVE
++                || place.material == StateTypes.SCAFFOLDING
++                || player.inVehicle()) return;
++
++
++        Vector3i pos = place.position;
++        Vector3d blockLoc = new Vector3d(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
++
++
++        int modX = place.getFace().getModX();
++        int modY = place.getFace().getModY();
++        int modZ = place.getFace().getModZ();
++        Vector3d againstLoc = new Vector3d(
++                pos.getX() - modX + 0.5,
++                pos.getY() - modY + 0.5,
++                pos.getZ() - modZ + 0.5
++        );
++
++        Vector3d playerLoc = new Vector3d(player.x, player.y, player.z);
++
++        double yDiff = blockLoc.getY() - playerLoc.getY();
++        double distancePlayerBlock = playerLoc.distance(blockLoc);
++        double distancePlayerAgainst = playerLoc.distance(againstLoc) + 0.4;
++
++
++        if (distancePlayerBlock >= 1.3
++                && distancePlayerBlock > distancePlayerAgainst
++                && yDiff <= 0.5) {
++
++
++            if (!player.packetStateData.lastPacketWasTeleport) {
++                flagAndAlert(String.format("d=%.2f ad=%.2f y=%.1f", distancePlayerBlock, distancePlayerAgainst, yDiff));
++            }
++        }
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/checks/impl/scaffolding/ScaffoldSync.java b/common/src/main/java/ac/grim/grimac/checks/impl/scaffolding/ScaffoldSync.java
+new file mode 100644
+index 0000000..71c0188
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/checks/impl/scaffolding/ScaffoldSync.java
+@@ -0,0 +1,50 @@
++package ac.grim.grimac.checks.impl.scaffolding;
++
++import ac.grim.grimac.checks.CheckData;
++import ac.grim.grimac.checks.type.BlockPlaceCheck;
++import ac.grim.grimac.checks.type.BlockPlaceListener;
++import ac.grim.grimac.checks.type.PacketReceiveListener;
++import ac.grim.grimac.player.GrimPlayer;
++import ac.grim.grimac.utils.anticheat.update.BlockPlace;
++import com.github.retrooper.packetevents.event.PacketReceiveEvent;
++import com.github.retrooper.packetevents.protocol.player.GameMode;
++import com.github.retrooper.packetevents.protocol.world.states.type.StateTypes;
++import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerFlying;
++
++@CheckData(name = "ScaffoldSync", stableKey = "grom.scaffold.packet_sync", experimental = true, setback = 0, description = "Scaffold Packet Detection(Kauri Inspiration)")
++public class ScaffoldSync extends BlockPlaceCheck implements BlockPlaceListener, PacketReceiveListener {
++
++    private long lastFlyingTime;
++    private float buffer;
++
++    public ScaffoldSync(GrimPlayer player) {
++        super(player);
++    }
++
++    @Override
++    public void onPacketReceive(PacketReceiveEvent event) {
++        if (WrapperPlayClientPlayerFlying.isFlying(event.getPacketType())) {
++            if (!player.packetStateData.lastPacketWasTeleport) {
++                lastFlyingTime = event.getTimestamp();
++            }
++        }
++
++    }
++
++    @Override
++    public void onBlockPlace(final BlockPlace place) {
++        if (player.gamemode == GameMode.CREATIVE
++                || place.material == StateTypes.SCAFFOLDING) return;
++
++        long delta = System.currentTimeMillis() - lastFlyingTime;
++
++        if (delta <= 25) {
++            if (++buffer > 10) {
++                flagAndAlert("delta=" + delta + "ms");
++            }
++        } else {
++            // Decaimento
++            buffer = Math.max(0, buffer - 0.25f);
++        }
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/events/packets/CheckManagerListener.java b/common/src/main/java/ac/grim/grimac/events/packets/CheckManagerListener.java
+index 44ecb61..a88e3c7 100644
+--- a/common/src/main/java/ac/grim/grimac/events/packets/CheckManagerListener.java
++++ b/common/src/main/java/ac/grim/grimac/events/packets/CheckManagerListener.java
+@@ -903,7 +903,9 @@ public class CheckManagerListener extends PacketListenerAbstract {
+ 
+         player.queuedBreaks.add(blockBreak);
+ 
+-        if (action == DiggingAction.FINISHED_DIGGING && isBreakable(blockBreak.block.getType())) {
++        // Creative clients break blocks on START_DIGGING; a FINISHED_DIGGING in creative must not predict air
++        // (otherwise a modified client could make Grim believe in ghost air blocks)
++        if (action == DiggingAction.FINISHED_DIGGING && player.gamemode != GameMode.CREATIVE && isBreakable(blockBreak.block.getType())) {
+             player.compensatedWorld.startPredicting();
+             player.compensatedWorld.updateBlock(blockBreak.position.x, blockBreak.position.y, blockBreak.position.z, 0);
+             player.compensatedWorld.stopPredicting(packet);
+diff --git a/common/src/main/java/ac/grim/grimac/manager/CheckManager.java b/common/src/main/java/ac/grim/grimac/manager/CheckManager.java
+index 4c579aa..f701831 100644
+--- a/common/src/main/java/ac/grim/grimac/manager/CheckManager.java
++++ b/common/src/main/java/ac/grim/grimac/manager/CheckManager.java
+@@ -9,6 +9,13 @@ import ac.grim.grimac.checks.debug.HitboxDebugHandler;
+ import ac.grim.grimac.checks.impl.aim.AimDuplicateLook;
+ import ac.grim.grimac.checks.impl.aim.AimModulo360;
+ import ac.grim.grimac.checks.impl.aim.AuraSnapBack;
++import ac.grim.grimac.checks.impl.aim.AimConsistent;
++import ac.grim.grimac.checks.impl.aim.AimConstant;
++import ac.grim.grimac.checks.impl.aim.AimGCD;
++import ac.grim.grimac.checks.impl.aim.AimIR;
++import ac.grim.grimac.checks.impl.aim.AimRounding;
++import ac.grim.grimac.checks.impl.aim.AimSnap;
++import ac.grim.grimac.checks.impl.combat.killaura.*;
+ import ac.grim.grimac.checks.impl.aim.processor.AimProcessor;
+ import ac.grim.grimac.checks.impl.badpackets.*;
+ import ac.grim.grimac.checks.impl.breaking.*;
+@@ -186,6 +193,27 @@ public class CheckManager implements BasicReloadable {
+                 .put(AimDuplicateLook.class, new AimDuplicateLook(player))
+                 .put(BehaviorA.class, new BehaviorA(player))
+                 .put(AuraSnapBack.class, new AuraSnapBack(player))
++                // Heuristic checks ported from Grom. Must stay after AimProcessor: AimGCD/AimSnap read its per-rotation output.
++                .put(AimConsistent.class, new AimConsistent(player))
++                .put(AimConstant.class, new AimConstant(player))
++                .put(AimGCD.class, new AimGCD(player))
++                .put(AimIR.class, new AimIR(player))
++                .put(AimRounding.class, new AimRounding(player))
++                .put(AimSnap.class, new AimSnap(player))
++                .put(KAZero.class, new KAZero(player))
++                .put(KACalc.class, new KACalc(player))
++                .put(AuraPostSnap.class, new AuraPostSnap(player))
++                .put(AuraMovement.class, new AuraMovement(player))
++                .put(AutoclickerA.class, new AutoclickerA(player))
++                .put(AutoclickerB.class, new AutoclickerB(player))
++                .put(AutoclickerC.class, new AutoclickerC(player))
++                .put(AutoclickerD.class, new AutoclickerD(player))
++                .put(AutoclickerE.class, new AutoclickerE(player))
++                .put(AutoclickerF.class, new AutoclickerF(player))
++                .put(AutoclickerG.class, new AutoclickerG(player))
++                .put(ScaffoldDirection.class, new ScaffoldDirection(player))
++                .put(ScaffoldRatio.class, new ScaffoldRatio(player))
++                .put(ScaffoldSync.class, new ScaffoldSync(player))
+                 .put(VehiclePredictionRunner.class, new VehiclePredictionRunner(player))
+ 
+                 .put(NegativeTimer.class, new NegativeTimer(player))
+diff --git a/common/src/main/java/ac/grim/grimac/utils/anticheat/AttackPackets.java b/common/src/main/java/ac/grim/grimac/utils/anticheat/AttackPackets.java
+new file mode 100644
+index 0000000..f765e98
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/utils/anticheat/AttackPackets.java
+@@ -0,0 +1,38 @@
++package ac.grim.grimac.utils.anticheat;
++
++import com.github.retrooper.packetevents.event.PacketReceiveEvent;
++import com.github.retrooper.packetevents.protocol.packettype.PacketType;
++import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientAttack;
++import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity;
++
++/**
++ * Newer clients send attacks in a dedicated ATTACK packet instead of INTERACT_ENTITY(ATTACK).
++ * Checks that only look at INTERACT_ENTITY never see attacks from those clients, so every
++ * attack-driven check should go through here.
++ */
++public final class AttackPackets {
++    public static final int NOT_AN_ATTACK = Integer.MIN_VALUE;
++
++    private AttackPackets() {
++    }
++
++    /**
++     * @return the attacked entity id, or {@link #NOT_AN_ATTACK} if this packet is not an attack
++     */
++    public static int attackedEntityId(PacketReceiveEvent event) {
++        if (event.getPacketType() == PacketType.Play.Client.ATTACK) {
++            return new WrapperPlayClientAttack(event).getEntityId();
++        }
++        if (event.getPacketType() == PacketType.Play.Client.INTERACT_ENTITY) {
++            WrapperPlayClientInteractEntity wrapper = new WrapperPlayClientInteractEntity(event);
++            if (wrapper.getAction() == WrapperPlayClientInteractEntity.InteractAction.ATTACK) {
++                return wrapper.getEntityId();
++            }
++        }
++        return NOT_AN_ATTACK;
++    }
++
++    public static boolean isAttack(PacketReceiveEvent event) {
++        return attackedEntityId(event) != NOT_AN_ATTACK;
++    }
++}
+diff --git a/common/src/main/java/ac/grim/grimac/utils/math/KauriMath.java b/common/src/main/java/ac/grim/grimac/utils/math/KauriMath.java
+new file mode 100644
+index 0000000..2766a8b
+--- /dev/null
++++ b/common/src/main/java/ac/grim/grimac/utils/math/KauriMath.java
+@@ -0,0 +1,42 @@
++package ac.grim.grimac.utils.math;
++
++import java.util.List;
++
++public class KauriMath {
++
++    public static float[] getRotation(double x, double y, double z, double tx, double ty, double tz) {
++        double diffX = tx - x;
++        double diffZ = tz - z;
++        double diffY = ty - y;
++
++        double dist = Math.sqrt(diffX * diffX + diffZ * diffZ);
++        float yaw = (float) (Math.atan2(diffZ, diffX) * 180.0D / Math.PI) - 90.0F;
++        float pitch = (float) (-(Math.atan2(diffY, dist) * 180.0D / Math.PI));
++
++        return new float[]{yaw, pitch};
++    }
++
++    public static float getAngleDistance(float angle1, float angle2) {
++        float dist = Math.abs(angle1 - angle2) % 360.0F;
++        if (dist > 180.0F) {
++            dist = 360.0F - dist;
++        }
++        return dist;
++    }
++
++    public static double stdev(List<Double> numbers) {
++        if (numbers == null || numbers.isEmpty()) return 0.0;
++        return GrimMath.calculateSD(numbers);
++    }
++
++
++    public static double getGridDouble(List<Double> samples) {
++        if (samples.size() < 2) return 0;
++
++        double result = samples.get(0);
++        for (int i = 1; i < samples.size(); i++) {
++            result = GrimMath.gcd(result, samples.get(i));
++        }
++        return result;
++    }
++}
+diff --git a/common/src/main/resources/config/en.yml b/common/src/main/resources/config/en.yml
+index f45d8b4..b849772 100644
+--- a/common/src/main/resources/config/en.yml
++++ b/common/src/main/resources/config/en.yml
+@@ -360,3 +360,17 @@ update-permission-ticks: -1
+ #                   auto-migrate up via the bundled updater on next start.
+ config-flavor: V2
+ config-version: 14
++
++# Server-side guards (Paper/Folia; ported from LegacyGrim, tightening patches only)
++# Block ender pearl throws at point blank into a solid wall/ceiling (pearl phasing)
++PearlPhasePrevention: true
++# Push players that end up inside a full solid block up to 3 blocks up on the same X/Z
++PushOutOfBlocks: true
++# Accepted block placements per player per server tick, both hands together; 0 disables the limit
++BlockPlaceLimit: 2
++# End crystal placements per second per player, both hands together; 0 disables the limit
++CrystalPlaceLimit: 6
++# Separate (lower) crystal limit for the first second after changing the held item; 0 = use CrystalPlaceLimit
++CrystalSwapPlaceLimit: 0
++# Allow placing a crystal on the same tick the main hand slot changed (silent swap)
++AllowCrystalSilentSwap: false
+diff --git a/common/src/main/resources/config/ru.yml b/common/src/main/resources/config/ru.yml
+index 30f618a..1bf3c53 100644
+--- a/common/src/main/resources/config/ru.yml
++++ b/common/src/main/resources/config/ru.yml
+@@ -319,3 +319,17 @@ update-permission-ticks: -1
+ 
+ config-flavor: V2
+ config-version: 14
++
++# Серверные защиты (Paper/Folia; перенесены из LegacyGrim, только ужесточения)
++# Блокировать бросок жемчуга впритык в твёрдую стену/потолок (фаза через жемчуг)
++PearlPhasePrevention: true
++# Выталкивать игрока из полного твёрдого блока вверх максимум на 3 блока по тем же X/Z
++PushOutOfBlocks: true
++# Принятых установок блоков на игрока за серверный тик, обе руки вместе; 0 отключает лимит
++BlockPlaceLimit: 2
++# Установок кристаллов в секунду на игрока, обе руки вместе; 0 отключает лимит
++CrystalPlaceLimit: 6
++# Отдельный (меньший) лимит кристаллов в первую секунду после смены предмета в руке; 0 = как CrystalPlaceLimit
++CrystalSwapPlaceLimit: 0
++# Разрешить ставить кристалл в тот же тик, когда сменился слот основной руки (silent swap)
++AllowCrystalSilentSwap: false
+diff --git a/common/src/main/resources/punishments/de.yml b/common/src/main/resources/punishments/de.yml
+index b36d866..a414907 100644
+--- a/common/src/main/resources/punishments/de.yml
++++ b/common/src/main/resources/punishments/de.yml
+@@ -401,3 +401,16 @@ Punishments:
+     commands:
+       - "20:40 [alert]"
+       - "1:1 [log]"
++  # Heuristic checks ported from Grom. Statistical, so alert/log only - no automatic kicks.
++  Heuristics:
++    remove-violations-after: 300
++    checks:
++      - "KillAuraZero"
++      - "AuraHitSnap"
++      - "AuraMovement"
++      - "ScaffoldDirection"
++      - "ScaffoldRatio"
++      - "ScaffoldSync"
++    commands:
++      - "10:20 [alert]"
++      - "1:1 [log]"
+diff --git a/common/src/main/resources/punishments/en.yml b/common/src/main/resources/punishments/en.yml
+index b2d9945..b7a3037 100644
+--- a/common/src/main/resources/punishments/en.yml
++++ b/common/src/main/resources/punishments/en.yml
+@@ -423,3 +423,16 @@ Punishments:
+     commands:
+       - "20:40 [alert]"
+       - "1:1 [log]"
++  # Heuristic checks ported from Grom. Statistical, so alert/log only - no automatic kicks.
++  Heuristics:
++    remove-violations-after: 300
++    checks:
++      - "KillAuraZero"
++      - "AuraHitSnap"
++      - "AuraMovement"
++      - "ScaffoldDirection"
++      - "ScaffoldRatio"
++      - "ScaffoldSync"
++    commands:
++      - "10:20 [alert]"
++      - "1:1 [log]"
+diff --git a/common/src/main/resources/punishments/es.yml b/common/src/main/resources/punishments/es.yml
+index 06ec341..4ea87bf 100644
+--- a/common/src/main/resources/punishments/es.yml
++++ b/common/src/main/resources/punishments/es.yml
+@@ -402,3 +402,16 @@ Punishments:
+     commands:
+       - "20:40 [alert]"
+       - "1:1 [log]"
++  # Heuristic checks ported from Grom. Statistical, so alert/log only - no automatic kicks.
++  Heuristics:
++    remove-violations-after: 300
++    checks:
++      - "KillAuraZero"
++      - "AuraHitSnap"
++      - "AuraMovement"
++      - "ScaffoldDirection"
++      - "ScaffoldRatio"
++      - "ScaffoldSync"
++    commands:
++      - "10:20 [alert]"
++      - "1:1 [log]"
+diff --git a/common/src/main/resources/punishments/fr.yml b/common/src/main/resources/punishments/fr.yml
+index 3af775b..2ce88f3 100644
+--- a/common/src/main/resources/punishments/fr.yml
++++ b/common/src/main/resources/punishments/fr.yml
+@@ -401,3 +401,16 @@ Punishments:
+     commands:
+       - "20:40 [alert]"
+       - "1:1 [log]"
++  # Heuristic checks ported from Grom. Statistical, so alert/log only - no automatic kicks.
++  Heuristics:
++    remove-violations-after: 300
++    checks:
++      - "KillAuraZero"
++      - "AuraHitSnap"
++      - "AuraMovement"
++      - "ScaffoldDirection"
++      - "ScaffoldRatio"
++      - "ScaffoldSync"
++    commands:
++      - "10:20 [alert]"
++      - "1:1 [log]"
+diff --git a/common/src/main/resources/punishments/it.yml b/common/src/main/resources/punishments/it.yml
+index c3acff9..4bdd432 100644
+--- a/common/src/main/resources/punishments/it.yml
++++ b/common/src/main/resources/punishments/it.yml
+@@ -400,3 +400,16 @@ Punishments:
+     commands:
+       - "20:40 [alert]"
+       - "1:1 [log]"
++  # Heuristic checks ported from Grom. Statistical, so alert/log only - no automatic kicks.
++  Heuristics:
++    remove-violations-after: 300
++    checks:
++      - "KillAuraZero"
++      - "AuraHitSnap"
++      - "AuraMovement"
++      - "ScaffoldDirection"
++      - "ScaffoldRatio"
++      - "ScaffoldSync"
++    commands:
++      - "10:20 [alert]"
++      - "1:1 [log]"
+diff --git a/common/src/main/resources/punishments/ja.yml b/common/src/main/resources/punishments/ja.yml
+index 524a90e..1b25ae2 100644
+--- a/common/src/main/resources/punishments/ja.yml
++++ b/common/src/main/resources/punishments/ja.yml
+@@ -401,3 +401,16 @@ Punishments:
+     commands:
+       - "20:40 [alert]"
+       - "1:1 [log]"
++  # Heuristic checks ported from Grom. Statistical, so alert/log only - no automatic kicks.
++  Heuristics:
++    remove-violations-after: 300
++    checks:
++      - "KillAuraZero"
++      - "AuraHitSnap"
++      - "AuraMovement"
++      - "ScaffoldDirection"
++      - "ScaffoldRatio"
++      - "ScaffoldSync"
++    commands:
++      - "10:20 [alert]"
++      - "1:1 [log]"
+diff --git a/common/src/main/resources/punishments/nl.yml b/common/src/main/resources/punishments/nl.yml
+index af324bc..2616212 100644
+--- a/common/src/main/resources/punishments/nl.yml
++++ b/common/src/main/resources/punishments/nl.yml
+@@ -401,3 +401,16 @@ Punishments:
+     commands:
+       - "20:40 [alert]"
+       - "1:1 [log]"
++  # Heuristic checks ported from Grom. Statistical, so alert/log only - no automatic kicks.
++  Heuristics:
++    remove-violations-after: 300
++    checks:
++      - "KillAuraZero"
++      - "AuraHitSnap"
++      - "AuraMovement"
++      - "ScaffoldDirection"
++      - "ScaffoldRatio"
++      - "ScaffoldSync"
++    commands:
++      - "10:20 [alert]"
++      - "1:1 [log]"
+diff --git a/common/src/main/resources/punishments/pt.yml b/common/src/main/resources/punishments/pt.yml
+index 08c4af4..3068f35 100644
+--- a/common/src/main/resources/punishments/pt.yml
++++ b/common/src/main/resources/punishments/pt.yml
+@@ -401,3 +401,16 @@ Punishments:
+     commands:
+       - "20:40 [alert]"
+       - "1:1 [log]"
++  # Heuristic checks ported from Grom. Statistical, so alert/log only - no automatic kicks.
++  Heuristics:
++    remove-violations-after: 300
++    checks:
++      - "KillAuraZero"
++      - "AuraHitSnap"
++      - "AuraMovement"
++      - "ScaffoldDirection"
++      - "ScaffoldRatio"
++      - "ScaffoldSync"
++    commands:
++      - "10:20 [alert]"
++      - "1:1 [log]"
+diff --git a/common/src/main/resources/punishments/ru.yml b/common/src/main/resources/punishments/ru.yml
+index de2e9f5..d5e2fd3 100644
+--- a/common/src/main/resources/punishments/ru.yml
++++ b/common/src/main/resources/punishments/ru.yml
+@@ -401,3 +401,16 @@ Punishments:
+     commands:
+       - "20:40 [alert]"
+       - "1:1 [log]"
++  # Heuristic checks ported from Grom. Statistical, so alert/log only - no automatic kicks.
++  Heuristics:
++    remove-violations-after: 300
++    checks:
++      - "KillAuraZero"
++      - "AuraHitSnap"
++      - "AuraMovement"
++      - "ScaffoldDirection"
++      - "ScaffoldRatio"
++      - "ScaffoldSync"
++    commands:
++      - "10:20 [alert]"
++      - "1:1 [log]"
+diff --git a/common/src/main/resources/punishments/tr.yml b/common/src/main/resources/punishments/tr.yml
+index b127499..72cc63d 100644
+--- a/common/src/main/resources/punishments/tr.yml
++++ b/common/src/main/resources/punishments/tr.yml
+@@ -401,3 +401,16 @@ Punishments:
+     commands:
+       - "20:40 [alert]"
+       - "1:1 [log]"
++  # Heuristic checks ported from Grom. Statistical, so alert/log only - no automatic kicks.
++  Heuristics:
++    remove-violations-after: 300
++    checks:
++      - "KillAuraZero"
++      - "AuraHitSnap"
++      - "AuraMovement"
++      - "ScaffoldDirection"
++      - "ScaffoldRatio"
++      - "ScaffoldSync"
++    commands:
++      - "10:20 [alert]"
++      - "1:1 [log]"
+diff --git a/common/src/main/resources/punishments/zh.yml b/common/src/main/resources/punishments/zh.yml
+index 20b521a..4c083a8 100644
+--- a/common/src/main/resources/punishments/zh.yml
++++ b/common/src/main/resources/punishments/zh.yml
+@@ -401,3 +401,16 @@ Punishments:
+     commands:
+       - "20:40 [alert]"
+       - "1:1 [log]"
++  # Heuristic checks ported from Grom. Statistical, so alert/log only - no automatic kicks.
++  Heuristics:
++    remove-violations-after: 300
++    checks:
++      - "KillAuraZero"
++      - "AuraHitSnap"
++      - "AuraMovement"
++      - "ScaffoldDirection"
++      - "ScaffoldRatio"
++      - "ScaffoldSync"
++    commands:
++      - "10:20 [alert]"
++      - "1:1 [log]"
