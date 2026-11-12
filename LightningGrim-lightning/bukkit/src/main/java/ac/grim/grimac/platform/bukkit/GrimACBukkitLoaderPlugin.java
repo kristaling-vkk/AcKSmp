@@ -1,0 +1,264 @@
+package ac.grim.grimac.platform.bukkit;
+
+import ac.grim.grimac.GrimAPI;
+import org.bukkit.entity.Player;
+import ac.grim.grimac.utils.reflection.ReflectionUtils;
+import ac.grim.grimac.platform.bukkit.entity.BukkitGrimEntity;
+import ac.grim.grimac.platform.bukkit.events.GlideSwapGuard;
+import ac.grim.grimac.platform.bukkit.events.CrystalSwapGuard;
+import ac.grim.grimac.platform.bukkit.events.BlockPlaceLimiter;
+import ac.grim.grimac.platform.bukkit.events.BlockPhaseProtection;
+import ac.grim.grimac.GrimExternalAPI;
+import ac.grim.grimac.api.GrimAPIProvider;
+import ac.grim.grimac.api.GrimAbstractAPI;
+import ac.grim.grimac.api.event.EventBus;
+import ac.grim.grimac.api.plugin.GrimPlugin;
+import ac.grim.grimac.command.CloudCommandService;
+import ac.grim.grimac.internal.platform.bukkit.resolver.BukkitResolverRegistrar;
+import ac.grim.grimac.manager.init.Initable;
+import ac.grim.grimac.manager.init.start.ExemptOnlinePlayersOnReload;
+import ac.grim.grimac.manager.init.start.StartableInitable;
+import ac.grim.grimac.platform.api.Platform;
+import ac.grim.grimac.platform.api.PlatformLoader;
+import ac.grim.grimac.platform.api.PlatformServer;
+import ac.grim.grimac.platform.api.command.CommandService;
+import ac.grim.grimac.platform.api.manager.ItemResetHandler;
+import ac.grim.grimac.platform.api.manager.MessagePlaceHolderManager;
+import ac.grim.grimac.platform.api.manager.PlatformPluginManager;
+import ac.grim.grimac.platform.api.manager.cloud.CloudPlatformCommandArguments;
+import ac.grim.grimac.platform.api.player.PlatformPlayerFactory;
+import ac.grim.grimac.platform.api.scheduler.PlatformScheduler;
+import ac.grim.grimac.platform.api.sender.Sender;
+import ac.grim.grimac.platform.api.sender.SenderFactory;
+import ac.grim.grimac.platform.bukkit.initables.BukkitBStats;
+import ac.grim.grimac.platform.bukkit.initables.BukkitLuckPermsInitable;
+import ac.grim.grimac.platform.bukkit.initables.BukkitTickEndEvent;
+import ac.grim.grimac.platform.bukkit.manager.BukkitItemResetHandler;
+import ac.grim.grimac.platform.bukkit.manager.BukkitMessagePlaceHolderManager;
+import ac.grim.grimac.platform.bukkit.manager.BukkitCloudPlatformCommandArguments;
+import ac.grim.grimac.platform.bukkit.manager.BukkitPermissionRegistrationManager;
+import ac.grim.grimac.platform.bukkit.manager.BukkitPlatformPluginManager;
+import ac.grim.grimac.platform.bukkit.player.BukkitPlatformPlayerFactory;
+import ac.grim.grimac.platform.bukkit.scheduler.bukkit.BukkitPlatformScheduler;
+import ac.grim.grimac.platform.bukkit.scheduler.folia.FoliaPlatformScheduler;
+import ac.grim.grimac.platform.bukkit.sender.BukkitSenderFactory;
+import ac.grim.grimac.platform.bukkit.utils.placeholder.PlaceholderAPIExpansion;
+import ac.grim.grimac.utils.anticheat.LogUtil;
+import ac.grim.grimac.utils.lazy.LazyHolder;
+import com.github.retrooper.packetevents.PacketEventsAPI;
+import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
+import lombok.Getter;
+import org.bukkit.Bukkit;
+import org.bukkit.command.CommandSender;
+import org.bukkit.plugin.ServicePriority;
+import org.bukkit.plugin.java.JavaPlugin;
+import org.incendo.cloud.CommandManager;
+import org.incendo.cloud.brigadier.BrigadierSetting;
+import org.incendo.cloud.brigadier.CloudBrigadierManager;
+import org.incendo.cloud.bukkit.CloudBukkitCapabilities;
+import org.incendo.cloud.execution.ExecutionCoordinator;
+import org.incendo.cloud.paper.LegacyPaperCommandManager;
+
+public final class GrimACBukkitLoaderPlugin extends JavaPlugin implements PlatformLoader {
+    public static GrimACBukkitLoaderPlugin LOADER;
+
+    private final LazyHolder<PlatformScheduler> scheduler = LazyHolder.simple(this::createScheduler);
+    private final LazyHolder<PacketEventsAPI<?>> packetEvents = LazyHolder.simple(() -> SpigotPacketEventsBuilder.build(this));
+    private final LazyHolder<BukkitSenderFactory> senderFactory = LazyHolder.simple(BukkitSenderFactory::new);
+    private final LazyHolder<ItemResetHandler> itemResetHandler = LazyHolder.simple(BukkitItemResetHandler::new);
+    private final LazyHolder<CommandService> commandService = LazyHolder.simple(this::createCommandService);
+    private final CloudPlatformCommandArguments commandArguments = new BukkitCloudPlatformCommandArguments();
+
+    @Getter private final PlatformPlayerFactory platformPlayerFactory = new BukkitPlatformPlayerFactory();
+    @Getter private final PlatformPluginManager pluginManager = new BukkitPlatformPluginManager();
+    @Getter private final GrimPlugin plugin;
+    @Getter private final PlatformServer platformServer = new BukkitPlatformServer();
+    @Getter private final MessagePlaceHolderManager messagePlaceHolderManager = new BukkitMessagePlaceHolderManager();
+    @Getter private final BukkitPermissionRegistrationManager permissionManager = new BukkitPermissionRegistrationManager();
+
+    public GrimACBukkitLoaderPlugin() {
+        BukkitResolverRegistrar registrar = new BukkitResolverRegistrar();
+        registrar.registerAll(GrimAPI.INSTANCE.getExtensionManager());
+        this.plugin = registrar.resolvePlugin(this);
+    }
+
+    @Override
+    public void onLoad() {
+        LOADER = this;
+        GrimAPI.INSTANCE.load(this, this.getBukkitInitTasks());
+    }
+
+    private Initable[] getBukkitInitTasks() {
+        return new Initable[] {
+                new ExemptOnlinePlayersOnReload(),
+                new BukkitTickEndEvent(),
+                new BukkitBStats(),
+                new BukkitLuckPermsInitable(),
+                (StartableInitable) () -> {
+                    if (BukkitMessagePlaceHolderManager.hasPlaceholderAPI) {
+                        new PlaceholderAPIExpansion().register();
+                    }
+                }
+        };
+    }
+
+    @Override
+    public void onEnable() {
+        GrimAPI.INSTANCE.start();
+        registerServerSideGuards();
+    }
+
+    // Server-side guards ported from LegacyGrim (tightening patches only): block/pearl phasing, actions from inside
+    // a solid block, block placement budget, crystal swap/rate limits, attack on the slot-swap tick, glide swap cycling.
+    // Some of them need Paper-only API; on plain Spigot those are skipped instead of failing plugin startup.
+    private void registerServerSideGuards() {
+        try {
+            BlockPhaseProtection.start(); // also registers EmbeddedInteractionGuard, 1.17+ only
+
+            boolean currentTick = ReflectionUtils.hasMethod(Bukkit.class, "getCurrentTick");
+            if (currentTick) {
+                Bukkit.getPluginManager().registerEvents(new BlockPlaceLimiter(), this);
+            }
+
+            if (currentTick && ReflectionUtils.hasClass("io.papermc.paper.event.player.PrePlayerAttackEntityEvent")) {
+                Bukkit.getPluginManager().registerEvents(new CrystalSwapGuard(), this);
+            } else {
+                getLogger().warning("Crystal swap/rate guard needs Paper 1.20+, skipping it on this server");
+            }
+
+            if (currentTick && ReflectionUtils.hasClass("com.destroystokyo.paper.event.player.PlayerArmorChangeEvent")) {
+                GlideSwapGuard glideSwapGuard = new GlideSwapGuard();
+                Bukkit.getPluginManager().registerEvents(glideSwapGuard, this);
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    GrimAPI.INSTANCE.getScheduler().getEntityScheduler().execute(new BukkitGrimEntity(player),
+                            GrimAPI.INSTANCE.getGrimPlugin(), () -> glideSwapGuard.initialize(player), null, 1);
+                }
+            } else {
+                getLogger().warning("Glide swap guard needs Paper, skipping it on this server");
+            }
+        } catch (Throwable t) {
+            // Never let an optional guard take the whole anticheat down
+            getLogger().log(java.util.logging.Level.SEVERE, "Failed to register server-side guards", t);
+        }
+    }
+
+    @Override
+    public void onDisable() {
+        GrimAPI.INSTANCE.stop();
+    }
+
+    @Override
+    public PlatformScheduler getScheduler() {
+        return scheduler.get();
+    }
+
+    @Override
+    public PacketEventsAPI<?> getPacketEvents() {
+        return packetEvents.get();
+    }
+
+    @Override
+    public ItemResetHandler getItemResetHandler() {
+        return itemResetHandler.get();
+    }
+
+    @Override
+    public CommandService getCommandService() {
+        return commandService.get();
+    }
+
+    @Override
+    public SenderFactory<CommandSender> getSenderFactory() {
+        return senderFactory.get();
+    }
+
+    @Override
+    @SuppressWarnings("removal")
+    public void registerAPIService() {
+        final GrimExternalAPI externalAPI = GrimAPI.INSTANCE.getExternalAPI();
+        final EventBus eventBus = externalAPI.getEventBus();
+        final ac.grim.grimac.api.plugin.GrimPlugin plugin = GrimAPI.INSTANCE.getGrimPlugin();
+
+        // Bridge Grim events → legacy Bukkit Event API so pre-1.3 plugins that
+        // listened for ac.grim.grimac.api.events.* Bukkit events keep working.
+        // Typed channel subscriptions here are plugin-bound so they go away if
+        // GrimAC itself is disabled.
+
+        eventBus.get(ac.grim.grimac.api.event.events.GrimJoinEvent.class).onJoin(plugin, (user) -> {
+            Bukkit.getPluginManager().callEvent(new ac.grim.grimac.api.events.GrimJoinEvent(user));
+        });
+
+        eventBus.get(ac.grim.grimac.api.event.events.GrimQuitEvent.class).onQuit(plugin, (user) -> {
+            Bukkit.getPluginManager().callEvent(new ac.grim.grimac.api.events.GrimQuitEvent(user));
+        });
+
+        eventBus.get(ac.grim.grimac.api.event.events.GrimReloadEvent.class).onReload(plugin, (success) -> {
+            Bukkit.getPluginManager().callEvent(new ac.grim.grimac.api.events.GrimReloadEvent(success));
+        });
+
+        // A legacy subscription enables GrimAPI's ThreadLocal event pool, retaining the last player and their world.
+        // Keep this bridge typed so it does not require a pooled FlagEvent.
+        eventBus.get(ac.grim.grimac.api.event.events.FlagEvent.class).onFlagSupplier(plugin, (user, check, verbose, cancelled) -> {
+            ac.grim.grimac.api.events.FlagEvent bukkitEvent =
+                    new ac.grim.grimac.api.events.FlagEvent(user, check, verbose);
+            Bukkit.getPluginManager().callEvent(bukkitEvent);
+            return cancelled || bukkitEvent.isCancelled();
+        }, 0, false);
+
+        eventBus.get(ac.grim.grimac.api.event.events.CommandExecuteEvent.class).onCommandExecuteSupplier(plugin, (user, check, verbose, command, cancelled) -> {
+            ac.grim.grimac.api.events.CommandExecuteEvent bukkitEvent =
+                    new ac.grim.grimac.api.events.CommandExecuteEvent(user, check, verbose, command);
+            Bukkit.getPluginManager().callEvent(bukkitEvent);
+            return cancelled || bukkitEvent.isCancelled();
+        });
+
+        eventBus.get(ac.grim.grimac.api.event.events.CompletePredictionEvent.class).onCompletePrediction(plugin, (user, check, offset, cancelled) -> {
+            // Legacy Bukkit event has a verbose field that the new channel event does not; pass empty.
+            ac.grim.grimac.api.events.CompletePredictionEvent bukkitEvent =
+                    new ac.grim.grimac.api.events.CompletePredictionEvent(user, check, "", offset);
+            Bukkit.getPluginManager().callEvent(bukkitEvent);
+            return cancelled || bukkitEvent.isCancelled();
+        });
+
+        GrimAPIProvider.init(externalAPI);
+        Bukkit.getServicesManager().register(GrimAbstractAPI.class, externalAPI, this, ServicePriority.Normal);
+    }
+
+    private PlatformScheduler createScheduler() {
+        return GrimAPI.INSTANCE.getPlatform() == Platform.FOLIA ? new FoliaPlatformScheduler() : new BukkitPlatformScheduler();
+    }
+
+    private CommandService createCommandService() {
+        try {
+            return new CloudCommandService(this::createCloudCommandManager, commandArguments);
+        } catch (Throwable t) {
+            LogUtil.warn("CRITICAL: Failed to initialize Command Framework. " +
+                    "Grim will continue to run with no commands.", t);
+            return () -> {};
+        }
+    }
+
+    private CommandManager<Sender> createCloudCommandManager() {
+        LegacyPaperCommandManager<Sender> manager = new LegacyPaperCommandManager<>(
+                this,
+                ExecutionCoordinator.simpleCoordinator(),
+                senderFactory.get()
+        );
+        if (manager.hasCapability(CloudBukkitCapabilities.NATIVE_BRIGADIER)) {
+            try {
+                manager.registerBrigadier();
+                CloudBrigadierManager<Sender, ?> cbm = manager.brigadierManager();
+                cbm.settings().set(BrigadierSetting.FORCE_EXECUTABLE, true);
+            } catch (Throwable t) {
+                LogUtil.error("Failed to register Brigadier native completions. Falling back to standard completions.", t);
+            }
+        } else if (manager.hasCapability(CloudBukkitCapabilities.ASYNCHRONOUS_COMPLETION)) {
+            manager.registerAsynchronousCompletions();
+        }
+        return manager;
+    }
+
+    public BukkitSenderFactory getBukkitSenderFactory() {
+        return senderFactory.get();
+    }
+}
