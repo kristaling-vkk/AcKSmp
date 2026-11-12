@@ -1,7 +1,6 @@
 package ac.grim.grimac.checks.type;
 
 import ac.grim.grimac.player.GrimPlayer;
-import ac.grim.grimac.utils.anticheat.update.PredictionComplete;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
@@ -18,10 +17,6 @@ public class InventoryCheck extends BlockPlaceCheck implements PacketReceiveList
 
     public InventoryCheck(GrimPlayer player) {
         super(player);
-    }
-
-    @Override
-    public void onPredictionComplete(PredictionComplete predictionComplete) {
     }
 
     @Override

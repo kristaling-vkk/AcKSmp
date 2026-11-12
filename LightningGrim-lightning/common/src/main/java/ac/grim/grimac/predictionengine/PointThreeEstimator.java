@@ -112,7 +112,6 @@ public class PointThreeEstimator {
     private boolean isNearHorizontalFlowingLiquid = false; // We can't calculate the direction, only a toggle
     private boolean isNearVerticalFlowingLiquid = false; // We can't calculate exact values, once again a toggle
     private boolean isNearBubbleColumn = false; // We can't calculate exact values once again
-    public boolean isNearNetherPortal = false; // We can't calculate exact values once again
 
     private int maxPositiveLevitation = Integer.MIN_VALUE; // Positive potion effects [0, 128]
     private int minNegativeLevitation = Integer.MAX_VALUE; // Negative potion effects [-127, -1]r
@@ -162,7 +161,7 @@ public class PointThreeEstimator {
             isNearFluid = true;
         }
 
-        player.checkManager.get(Reach.class).handleBlockChange(new Vector3i(x, y, z), state);
+        player.checkManager.get(Reach.class).handleBlockChange(new Vector3i(x, y, z));
 
         if (pointThreeBox.isIntersected(new SimpleCollisionBox(x, y, z)) && !data.isNull()) {
             // https://github.com/MWHunter/Grim/issues/613
