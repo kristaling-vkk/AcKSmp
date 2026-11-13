@@ -855,7 +855,7 @@ public class PredictionEngine {
         if (player.uncertaintyHandler.lastVehicleSwitch.hasOccurredSince(1)) {
             player.uncertaintyHandler.boxMutatorScratch |= UncertaintyHandler.BOX_VEHICLE_FRICTION;
             float airDrag = BlockProperties.getModifiedAirDrag(0.91F, player);
-            double trueFriction = player.lastOnGround ? player.friction * airDrag : airDrag;
+            double trueFriction = player.lastOnGround ? player.friction : airDrag;
             if (player.wasTouchingLava) trueFriction = 0.5;
             if (player.wasTouchingWater) trueFriction = 0.96;
 
