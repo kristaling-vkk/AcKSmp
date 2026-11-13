@@ -63,6 +63,15 @@ cancel-duplicate-packet: true
 # Whether or not to ignore the rotation in duplicate packets
 ignore-duplicate-packet-rotation: true
 
+# queue potential duplicate packets until the next packet to check if it actually was a duplicate
+# and require the same player position and head rotation for duplicates sent in the same tick
+strict-duplicate-handling: false
+
+# How many inventory clicks should we allow per server tick?
+# Any clicks after this threshold is reached will be cancelled.
+# Set to -1 to disable.
+max-clicks-per-tick: 3
+
 Simulation:
     # Predict a glider that stopped sending positions. Without it the check only runs on the client's
     # 20-tick position reminder, which is a second of free hovering.
@@ -243,6 +252,9 @@ Reach:
     # Должны ли мы отменять удары, которые, как мы знаем, невозможны?
     # Удары 3.00-3.03 могут пройти, но все равно будут замечены из-за ограничений на порядок пакетов.
     block-impossible-hits: true
+    # Отменять удары, пока игрок держит неотвеченную транзакцию дольше стольких миллисекунд (backtrack / fake lag:
+    # удары засчитываются по позициям целей, которые игрок подтвердил транзакциями). -1 — выключить
+    max-transaction-delay-ms: 1000
     # Sends an additional packet at the end of every tick to increase the likelihood of catching cheats.
     # Injects into server's connection list to send a final packet just before the server flushes.
     # Increases bandwidth usage for all players but does not decrease overall server performance.
@@ -259,6 +271,19 @@ exploit:
     # Эта опция смягчает размещение игрока на блоках-призраках, ресинхронизируя его, когда это происходит.
     allow-building-on-ghostblocks: true
     distance-to-check-if-ghostblocks: 2
+    # Лимиты пакетов против крашей и лагов (из SolunaMC/Grim; проверки ExploitC/D/E, ChatF, CrashB, CrashH). 0 — без лимита.
+    max-sign-line-length: 100
+    max-sign-length: 256
+    sign-block-control-characters: true
+    sign-block-format-codes: false
+    payloads-per-second: 500
+    max-payload-bytes: 1048576
+    blocked-payload-channels: []
+    max-item-packet-bytes: 2097152
+    max-item-nbt-depth: 128
+    commands-per-second: 20
+    max-command-length: 2048
+    tab-completes-per-second: 100
 
 # Включить запись в журнал плагинов, которые внедрились в netty при присоединении для отладки проблем совместимости
 debug-pipeline-on-join: false
@@ -268,7 +293,19 @@ experimental-checks: false
 
 # Enable specific experimental checks individually when experimental-checks is false.
 # When experimental-checks is true, all experimental checks are enabled and this list is ignored.
+# Экспериментальные проверки с наименьшим риском: действия, которые ванильный клиент не может отправить
+# с открытым окном (состояние окна подтверждено транзакциями), и строгие проверки протокола.
 enabled-experimental-checks:
+  - "BadPacketsH"
+  - "BadPacketsZ"
+  - "ElytraQ"
+  - "MultiActionsI"
+  - "MultiActionsJ"
+  - "MultiActionsK"
+  - "MultiActionsL"
+  - "MultiActionsN"
+  - "MultiActionsP"
+  - "MultiActionsQ"
 #  - "AirStuck"
 #  - "ElytraL"
 #  - "ElytraM"
@@ -318,7 +355,7 @@ max-ping-firework-boost: 1000
 update-permission-ticks: -1
 
 config-flavor: V2
-config-version: 14
+config-version: 16
 
 # Серверные защиты (Paper/Folia; перенесены из LegacyGrim, только ужесточения)
 # Блокировать бросок жемчуга впритык в твёрдую стену/потолок (фаза через жемчуг)

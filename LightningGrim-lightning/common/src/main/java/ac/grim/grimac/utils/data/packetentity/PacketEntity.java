@@ -32,6 +32,7 @@ import com.github.retrooper.packetevents.protocol.item.ItemStack;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.protocol.player.EquipmentSlot;
 import com.github.retrooper.packetevents.protocol.potion.PotionType;
+import com.github.retrooper.packetevents.resources.ResourceLocation;
 import com.github.retrooper.packetevents.util.Vector3d;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
@@ -323,6 +324,10 @@ public class PacketEntity extends TypedPacketEntity {
     public boolean isPushable() {
         if (isDead) return false; // vanilla LivingEntity.isPushable: !isDeadOrDying()
         return super.isPushable();
+    }
+
+    public final boolean hasTag(ResourceLocation tag) {
+        return player.tagManager.entityType(tag).contains(this.getType());
     }
 
     public void setItemBySlot(EquipmentSlot slot, ItemStack item) {

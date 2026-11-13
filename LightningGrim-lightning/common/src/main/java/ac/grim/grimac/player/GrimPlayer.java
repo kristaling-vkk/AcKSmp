@@ -153,6 +153,7 @@ public class GrimPlayer implements GrimUser {
     public double gravity;
     public float friction;
     public double speed;
+    public com.github.retrooper.packetevents.protocol.world.Location lastDuplicateLocationThisTick;
     public final @NotNull Vector3dm filterMojangStupidityOnMojangStupidity = new Vector3dm();
     public double x;
     public double y;
@@ -267,6 +268,7 @@ public class GrimPlayer implements GrimUser {
     public final @NotNull PlayerBlockHistory blockHistory = new PlayerBlockHistory();
     public final @NotNull ArrayDeque<@NotNull RotationData> pendingRotations = new ArrayDeque<>();
     public final @NotNull CompensatedCameraEntity cameraEntity;
+    public final @NotNull CompensatedOpenWindow openWindow;
     @Getter @Setter private ResyncHandler resyncHandler = GrimAPI.INSTANCE.getConfigManager().getConfig().getBooleanElse("disable-default-resync-handler", false) ? NoOpResyncHandler.INSTANCE : new DefaultResyncHandler(this);
     @Getter private final @NotNull FeatureManagerImpl featureManager = new FeatureManagerImpl(this);
     public boolean serverOpenedInventoryThisTick;
@@ -277,6 +279,7 @@ public class GrimPlayer implements GrimUser {
     private int spamThreshold = 100;
     private int maxTransactionTime = 60;
     @Getter private boolean ignoreDuplicatePacketRotation = true;
+    @Getter private boolean strictDuplicateHandling = false;
     @Getter @Setter private boolean experimentalChecks = false;
     @Getter private boolean cancelDuplicatePacket = true;
     @Getter @Setter private boolean exemptElytra;
@@ -301,6 +304,7 @@ public class GrimPlayer implements GrimUser {
     public boolean wasLastPredictionCompleteChecked;
     public boolean isJumping;
     public boolean lastJumping;
+    public int jumpDelay;
     public final @NotNull EntityFluidInteraction fluidInteraction = new EntityFluidInteraction(this, FluidTag.WATER, FluidTag.LAVA);
     public boolean canFloatWhileRidden;
 
@@ -315,6 +319,7 @@ public class GrimPlayer implements GrimUser {
         this.compensatedEntities = new CompensatedEntities(this);
         this.dashableEntities = new CompensatedDashableEntities();
         this.cameraEntity = new CompensatedCameraEntity(this);
+        this.openWindow = new CompensatedOpenWindow(this);
 
         this.lastInstanceManager = new LastInstanceManager(this);
         this.attackCooldown = new AttackCooldownHandler(this);
@@ -894,6 +899,12 @@ public class GrimPlayer implements GrimUser {
         if (platformPlayer != null) platformPlayer.resyncSharedFlags();
     }
 
+    public void closeInventory() {
+        if (platformPlayer != null) {
+            platformPlayer.closeInventory();
+        }
+    }
+
     public boolean canPlaceGameMasterBlocks() {
         // This check was added in 1.11
         // 1.11+ players must be in creative and have a permission level at or above 2
@@ -1012,6 +1023,7 @@ public class GrimPlayer implements GrimUser {
         spamThreshold = config.getIntElse("packet-spam-threshold", 100);
         maxTransactionTime = GrimMath.clamp(config.getIntElse("max-transaction-time", 60), 1, 180);
         ignoreDuplicatePacketRotation = config.getBooleanElse("ignore-duplicate-packet-rotation", true);
+        strictDuplicateHandling = config.getBooleanElse("strict-duplicate-handling", false);
         cancelDuplicatePacket = config.getBooleanElse("cancel-duplicate-packet", true);
 
         boolean shouldDisableResync = config.getBooleanElse("disable-default-resync-handler", false);

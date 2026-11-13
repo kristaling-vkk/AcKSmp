@@ -21,6 +21,7 @@ import ac.grim.grimac.checks.Check;
 import ac.grim.grimac.checks.CheckData;
 import ac.grim.grimac.checks.type.PacketReceiveListener;
 import ac.grim.grimac.player.GrimPlayer;
+import ac.grim.grimac.utils.data.ShortToLongPair;
 import ac.grim.grimac.utils.collisions.datatypes.SimpleCollisionBox;
 import ac.grim.grimac.utils.data.BlockHitData;
 import ac.grim.grimac.utils.data.EntityHitData;
@@ -89,6 +90,8 @@ public class Reach extends Check implements PacketReceiveListener {
     private Set<String> wallHitIgnoredBlocks = new HashSet<>();
     private final java.util.HashMap<Integer, Double> cancelBuffers = new java.util.HashMap<>();
 
+    private long maxTransactionDelayMillis; // -1 disables
+
     public Reach(GrimPlayer player) {
         super(player);
     }
@@ -116,6 +119,14 @@ public class Reach extends Check implements PacketReceiveListener {
     private void onInteract(PacketReceiveEvent event, int entityId, InteractionHand hand) {
         // Don't let the player teleport to bypass reach
         if (player.getSetbackTeleportUtil().shouldBlockMovement()) {
+            event.setCancelled(true);
+            player.onPacketCancel();
+            return;
+        }
+
+        // Hits are judged against target positions the player has confirmed by answering transactions, so holding
+        // transactions back (backtrack, fake lag) lets a cheat hit where targets were seconds ago (from kinchinmatheus/Grim)
+        if (shouldModifyPackets() && isTransactionHeldTooLong()) {
             event.setCancelled(true);
             player.onPacketCancel();
             return;
@@ -473,8 +484,17 @@ public class Reach extends Check implements PacketReceiveListener {
         return maxReach + reachExtraExpansion;
     }
 
+    private boolean isTransactionHeldTooLong() {
+        if (maxTransactionDelayMillis < 0) return false;
+
+        java.util.Queue<ShortToLongPair> sent = player.transactionsSent;
+        ShortToLongPair oldestUnanswered = sent == null ? null : sent.peek();
+        return oldestUnanswered != null && System.nanoTime() - oldestUnanswered.second() > maxTransactionDelayMillis * 1_000_000L;
+    }
+
     @Override
     public void onReload(@NotNull ConfigManager config) {
+        this.maxTransactionDelayMillis = config.getLongElse("Reach.max-transaction-delay-ms", 1000);
         this.cancelImpossibleHits = config.getBooleanElse("Reach.block-impossible-hits", true);
         this.cancelObstructedHits = config.getBooleanElse("WallHit.cancel-hits", true);
         this.cancelBufferDecay = Math.max(0.01, config.getDoubleElse("Reach.cancel-buffer-decay", 0.25));

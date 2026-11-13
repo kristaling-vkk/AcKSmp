@@ -415,6 +415,9 @@ Punishments:
       - "TransactionOrder"
       - "Chat"
       - "ExploitB"
+      - "ExploitC"
+      - "ExploitD"
+      - "ExploitE"
     commands:
       - "10:5 [alert]"
       - "1:1 [log]"

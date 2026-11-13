@@ -43,7 +43,7 @@ public class VectorData {
     public IndexedVector3d stuckSpeedMultiplier = StuckSpeed.NONE;
 
     @Getter
-    private boolean isKnockback, firstBreadKb, isExplosion, firstBreadExplosion, isTrident, isZeroPointZeroThree, isSwimHop, isFlipSneaking, isFlipItem, isJump, isAttackSlow = false, isWithInput = false;
+    private boolean isKnockback, firstBreadKb, isExplosion, firstBreadExplosion, isTrident, isZeroPointZeroThree, isSwimHop, isFlipSneaking, isFlipItem, isJump, isJumpFromGround, isAttackSlow = false, isWithInput = false;
 
     // For handling replacing the type of vector it is while keeping data
     public VectorData(Vector3dm vector, VectorData lastVector, VectorType vectorType) {
@@ -62,6 +62,7 @@ public class VectorData {
             isFlipSneaking = lastVector.isFlipSneaking;
             isFlipItem = lastVector.isFlipItem;
             isJump = lastVector.isJump;
+            isJumpFromGround = lastVector.isJumpFromGround;
             preUncertainty = lastVector.preUncertainty;
             isAttackSlow = lastVector.isAttackSlow;
             input = lastVector.input;
@@ -119,6 +120,10 @@ public class VectorData {
             case Flip_Sneaking -> isFlipSneaking = true;
             case Flip_Use_Item -> isFlipItem = true;
             case Jump -> isJump = true;
+            case JumpFromGround -> {
+                isJump = true;
+                isJumpFromGround = true;
+            }
             case AttackSlow -> isAttackSlow = true;
             case WithInput -> isWithInput = true;
         }
@@ -152,6 +157,7 @@ public class VectorData {
         Spectator,
         Dead,
         Jump,
+        JumpFromGround,
         SurfaceSwimming,
         SwimmingSpace,
         BestVelPicked,

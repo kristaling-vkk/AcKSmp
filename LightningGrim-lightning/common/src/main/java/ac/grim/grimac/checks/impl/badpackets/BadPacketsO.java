@@ -17,6 +17,7 @@ import java.util.LinkedList;
 @CheckData(name = "BadPacketsO", stableKey = "grim.badpackets.invalid_keepalive", description = "Responded with a keepalive ID that was not sent by the server")
 public class BadPacketsO extends Check implements PacketReceiveListener, PacketSendListener {
     private static final Verbose V = Verbose.of("id={slong}");
+    private static final Verbose SKIPPED = Verbose.of("skipped={sint}");
 
     private final LinkedList<Long> keepalives = new LinkedList<>();
 
@@ -36,19 +37,28 @@ public class BadPacketsO extends Check implements PacketReceiveListener, PacketS
         if (event.getPacketType() == PacketType.Play.Client.KEEP_ALIVE) {
             final long id = new WrapperPlayClientKeepAlive(event).getId();
 
+            // Keepalives are answered in order: skipping older ones means they were held back or dropped
+            // (ping spoof / blink). From ManInMyVan's unmerged upstream "keepaliveorder" branch.
+            int skipped = -1;
+
             for (long keepalive : keepalives) {
                 if (keepalive == id) {
                     // Found the ID, remove stuff until we get to it (to stop very slow memory leaks)
                     Long data;
                     do {
                         data = keepalives.poll();
+                        skipped++;
                     } while (data != null && data != id);
 
-                    return;
+                    break;
                 }
             }
 
-            if (flag(V.write(verbose()).slong(id)) && shouldModifyPackets()) {
+            boolean flagged = skipped == -1
+                    ? flag(V.write(verbose()).slong(id))
+                    : skipped != 0 && flag(SKIPPED.write(verbose()).sint(skipped));
+
+            if (flagged && shouldModifyPackets()) {
                 event.setCancelled(true);
                 player.onPacketCancel();
             }
