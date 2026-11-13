@@ -35,8 +35,13 @@ public class WorldRayTrace {
     public static BlockHitData getNearestBlockHitResult(GrimPlayer player, StateType heldItem, boolean sourcesHaveHitbox, boolean fluidPlacement, boolean itemUsePlacement) {
         Vector3d startingPos = new Vector3d(player.x, player.y + player.getEyeHeight(), player.z);
         Vector3dm startingVec = new Vector3dm(startingPos.getX(), startingPos.getY(), startingPos.getZ());
-        Ray trace = new Ray(player, startingPos.getX(), startingPos.getY(), startingPos.getZ(), player.yaw, player.pitch);
-        final double distance = itemUsePlacement && player.getClientVersion().isOlderThan(ClientVersion.V_1_20_5) ? 5 : player.compensatedEntities.self.getAttributeValue(Attributes.BLOCK_INTERACTION_RANGE);
+        // Buckets and lily pads used the legacy item-use ray direction through 1.20.4 (upstream 73eee60fc)
+        boolean legacyItemRay = itemUsePlacement && player.getClientVersion().isOlderThan(ClientVersion.V_1_20_5);
+        Vector3dm direction = legacyItemRay
+                ? ReachUtils.getLegacyLook(player, player.yaw, player.pitch)
+                : ReachUtils.getLook(player, player.yaw, player.pitch);
+        Ray trace = new Ray(startingVec, direction);
+        final double distance = legacyItemRay ? 5.0 : player.compensatedEntities.self.getAttributeValue(Attributes.BLOCK_INTERACTION_RANGE);
         Vector3d endVec = trace.getPointAtDistance(distance);
         Vector3d endPos = new Vector3d(endVec.getX(), endVec.getY(), endVec.getZ());
 
