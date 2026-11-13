@@ -59,9 +59,12 @@ public final class GrimConfigSpecs {
      *
      * <p>v12 → v13: turns {@code WallHit.cancel-hits} on. Auto-lift would carry an
      * existing value forward, so this migration writes the new default explicitly.
+     *
+     * <p>v14 → v15: adds {@code max-clicks-per-tick} and {@code strict-duplicate-handling}
+     * (ported from ManInMyVan's unmerged upstream branches). No explicit migration is needed.
      */
     public static @NotNull ConfigUpdater.Spec mainConfig() {
-        return ConfigUpdater.Spec.builder("/config/", 14, ConfigUpdater.ConfigFlavor.V2)
+        return ConfigUpdater.Spec.builder("/config/", 15, ConfigUpdater.ConfigFlavor.V2)
                 .migration(10, ctx -> {
                     String typeRaw = ctx.input().getString("history.database.type");
                     String type = typeRaw == null ? null : typeRaw.trim().toUpperCase(Locale.ROOT);

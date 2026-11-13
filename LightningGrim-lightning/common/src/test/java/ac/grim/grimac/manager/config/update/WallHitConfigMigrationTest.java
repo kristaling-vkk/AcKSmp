@@ -23,7 +23,7 @@ class WallHitConfigMigrationTest {
         assertEquals(List.of(), migrate(old));
         assertEquals(old, Files.readString(directory.resolve("config.yml.v13.bak")));
         Map<?, ?> updated = new Yaml().load(Files.readString(directory.resolve("config.yml")));
-        assertEquals(14, updated.get("config-version"));
+        assertEquals(15, updated.get("config-version"));
     }
 
     @Test
@@ -44,7 +44,7 @@ class WallHitConfigMigrationTest {
             try (var stream = getClass().getResourceAsStream("/config/" + locale + ".yml")) {
                 assertNotNull(stream, locale);
                 Map<?, ?> defaults = new Yaml().load(stream);
-                assertEquals(14, defaults.get("config-version"), locale);
+                assertEquals(15, defaults.get("config-version"), locale);
                 assertEquals(List.of(), ((Map<?, ?>) defaults.get("WallHit")).get("ignored-blocks"), locale);
             }
         }

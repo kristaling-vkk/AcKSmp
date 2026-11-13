@@ -63,6 +63,15 @@ cancel-duplicate-packet: true
 # Whether or not to ignore the rotation in duplicate packets
 ignore-duplicate-packet-rotation: true
 
+# queue potential duplicate packets until the next packet to check if it actually was a duplicate
+# and require the same player position and head rotation for duplicates sent in the same tick
+strict-duplicate-handling: false
+
+# How many inventory clicks should we allow per server tick?
+# Any clicks after this threshold is reached will be cancelled.
+# Set to -1 to disable.
+max-clicks-per-tick: 3
+
 Simulation:
     # Predict a glider that stopped sending positions. Without it the check only runs on the client's
     # 20-tick position reminder, which is a second of free hovering.
@@ -359,7 +368,7 @@ update-permission-ticks: -1
 #   config-version: bumped on every breaking shape change. Old configs
 #                   auto-migrate up via the bundled updater on next start.
 config-flavor: V2
-config-version: 14
+config-version: 15
 
 # Server-side guards (Paper/Folia; ported from LegacyGrim, tightening patches only)
 # Block ender pearl throws at point blank into a solid wall/ceiling (pearl phasing)

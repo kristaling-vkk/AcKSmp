@@ -104,6 +104,7 @@ public class PointThreeEstimator {
     // If a player places a ladder in a worldguard region etc.
     @Getter
     private boolean isNearClimbable = false;
+    public boolean isNearPortal;
     // If a player stops and start gliding all within 0.03
     private boolean isGliding = false;
     // If the player's gravity has changed
@@ -274,6 +275,7 @@ public class PointThreeEstimator {
         isNearBubbleColumn = false;
         isNearFluid = false;
         isNearNetherPortal = false;
+        isNearPortal = false;
 
         // Check for flowing water
         Collisions.hasMaterial(player, pointThreeBox, (block, x, y, z) -> {
@@ -305,6 +307,10 @@ public class PointThreeEstimator {
 
             if (fluidVector.getY() != 0) {
                 isNearVerticalFlowingLiquid = true;
+            }
+
+            if (stateType == StateTypes.NETHER_PORTAL) {
+                isNearPortal = true;
             }
 
             return false;
