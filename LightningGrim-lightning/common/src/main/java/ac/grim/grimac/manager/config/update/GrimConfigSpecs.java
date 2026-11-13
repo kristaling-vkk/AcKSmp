@@ -38,6 +38,12 @@ import java.util.Locale;
 @UtilityClass
 public final class GrimConfigSpecs {
 
+    /** Experimental checks on by default: impossible-with-a-window-open actions and strict protocol checks. */
+    static final java.util.List<String> LOW_RISK_EXPERIMENTAL_CHECKS = java.util.List.of(
+            "BadPacketsH", "BadPacketsZ", "ElytraQ",
+            "MultiActionsI", "MultiActionsJ", "MultiActionsK", "MultiActionsL",
+            "MultiActionsN", "MultiActionsP", "MultiActionsQ");
+
     /**
      * Spec for the main {@code config.yml}.
      *
@@ -62,9 +68,13 @@ public final class GrimConfigSpecs {
      *
      * <p>v14 → v15: adds {@code max-clicks-per-tick} and {@code strict-duplicate-handling}
      * (ported from ManInMyVan's unmerged upstream branches). No explicit migration is needed.
+     *
+     * <p>v15 → v16: enables the lowest-risk experimental checks. An empty or missing
+     * {@code enabled-experimental-checks} list gets the new default; a list the operator
+     * already filled in is left untouched.
      */
     public static @NotNull ConfigUpdater.Spec mainConfig() {
-        return ConfigUpdater.Spec.builder("/config/", 15, ConfigUpdater.ConfigFlavor.V2)
+        return ConfigUpdater.Spec.builder("/config/", 16, ConfigUpdater.ConfigFlavor.V2)
                 .migration(10, ctx -> {
                     String typeRaw = ctx.input().getString("history.database.type");
                     String type = typeRaw == null ? null : typeRaw.trim().toUpperCase(Locale.ROOT);
@@ -108,6 +118,12 @@ public final class GrimConfigSpecs {
                 })
                 .migration(12, ctx -> ctx.output().put("WallHit.cancel-hits", true))
                 .migration(14, LegacyWallHitBlocks::migrate)
+                .migration(16, ctx -> {
+                    java.util.List<?> enabled = ctx.input().getList("enabled-experimental-checks");
+                    if (enabled == null || enabled.isEmpty()) {
+                        ctx.output().put("enabled-experimental-checks", LOW_RISK_EXPERIMENTAL_CHECKS);
+                    }
+                })
                 .build();
     }
 

@@ -293,7 +293,19 @@ experimental-checks: false
 
 # Enable specific experimental checks individually when experimental-checks is false.
 # When experimental-checks is true, all experimental checks are enabled and this list is ignored.
+# Экспериментальные проверки с наименьшим риском: действия, которые ванильный клиент не может отправить
+# с открытым окном (состояние окна подтверждено транзакциями), и строгие проверки протокола.
 enabled-experimental-checks:
+  - "BadPacketsH"
+  - "BadPacketsZ"
+  - "ElytraQ"
+  - "MultiActionsI"
+  - "MultiActionsJ"
+  - "MultiActionsK"
+  - "MultiActionsL"
+  - "MultiActionsN"
+  - "MultiActionsP"
+  - "MultiActionsQ"
 #  - "AirStuck"
 #  - "ElytraL"
 #  - "ElytraM"
@@ -343,7 +355,7 @@ max-ping-firework-boost: 1000
 update-permission-ticks: -1
 
 config-flavor: V2
-config-version: 15
+config-version: 16
 
 # Серверные защиты (Paper/Folia; перенесены из LegacyGrim, только ужесточения)
 # Блокировать бросок жемчуга впритык в твёрдую стену/потолок (фаза через жемчуг)

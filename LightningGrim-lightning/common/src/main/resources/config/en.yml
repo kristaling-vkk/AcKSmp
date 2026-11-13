@@ -338,7 +338,19 @@ experimental-checks: false
 
 # Enable specific experimental checks individually when experimental-checks is false.
 # When experimental-checks is true, all experimental checks are enabled and this list is ignored.
+# Lowest-risk experimental checks: actions a vanilla client cannot send with a container open
+# (window state confirmed by transactions), plus strict protocol-order checks.
 enabled-experimental-checks:
+  - "BadPacketsH"
+  - "BadPacketsZ"
+  - "ElytraQ"
+  - "MultiActionsI"
+  - "MultiActionsJ"
+  - "MultiActionsK"
+  - "MultiActionsL"
+  - "MultiActionsN"
+  - "MultiActionsP"
+  - "MultiActionsQ"
 #  - "AirStuck"
 #  - "ElytraL"
 #  - "ElytraM"
@@ -385,7 +397,7 @@ update-permission-ticks: -1
 #   config-version: bumped on every breaking shape change. Old configs
 #                   auto-migrate up via the bundled updater on next start.
 config-flavor: V2
-config-version: 15
+config-version: 16
 
 # Server-side guards (Paper/Folia; ported from LegacyGrim, tightening patches only)
 # Block ender pearl throws at point blank into a solid wall/ceiling (pearl phasing)
