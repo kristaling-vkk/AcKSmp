@@ -176,6 +176,9 @@ TimerLimit:
     # Can cause some setbacks for legitimate players but only if they are over this ping threshold.
     # -1 to disable
     ping-abuse-limit-threshold: 1000
+    # Сколько мс полного «молчания» клиента (фриз Wi-Fi/мобильной сети) засчитывать как реально прошедшее время,
+    # чтобы пачка пакетов после лага не давала ложных откатов. Больше тиков, чем прошло времени, всё равно не пройдёт. 0 — выключить
+    max-lag-spike-credit: 3000
 
 NegativeTimer:
     # Количество миллисекунд, потерянных во время движения, до того, как мы начнем ставить флаг
@@ -355,7 +358,7 @@ max-ping-firework-boost: 1000
 update-permission-ticks: -1
 
 config-flavor: V2
-config-version: 16
+config-version: 17
 
 # Серверные защиты (Paper/Folia; перенесены из LegacyGrim, только ужесточения)
 # Блокировать бросок жемчуга впритык в твёрдую стену/потолок (фаза через жемчуг)

@@ -72,9 +72,11 @@ public final class GrimConfigSpecs {
      * <p>v15 → v16: enables the lowest-risk experimental checks. An empty or missing
      * {@code enabled-experimental-checks} list gets the new default; a list the operator
      * already filled in is left untouched.
+     *
+     * <p>v16 → v17: adds {@code TimerLimit.max-lag-spike-credit}. No explicit migration is needed.
      */
     public static @NotNull ConfigUpdater.Spec mainConfig() {
-        return ConfigUpdater.Spec.builder("/config/", 16, ConfigUpdater.ConfigFlavor.V2)
+        return ConfigUpdater.Spec.builder("/config/", 17, ConfigUpdater.ConfigFlavor.V2)
                 .migration(10, ctx -> {
                     String typeRaw = ctx.input().getString("history.database.type");
                     String type = typeRaw == null ? null : typeRaw.trim().toUpperCase(Locale.ROOT);

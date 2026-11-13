@@ -123,6 +123,12 @@
 - **Не разобрано (кандидаты на следующий раунд):** kinchinmatheus (AutoRefill, AutoSoup, ClickRegularity, FastPlace-ужесточения, AuraBot), EdGrim (StuckA, ScaffoldD/E), Anic3 MacroBlockPlace, NothingFlare (AutoTotem, FastBreak, NoFall), MathsAnalysis (AutoArmor, ESP), Fastechgaming (instant swaps/action), skillowiks (TriggerBot), GigaZelensky FastPlace 7/8 (у нас нет этой FastPlace), cyramek/z7087/SaltyAlpha (точность и производительность, не ужесточения).
 - **Важно:** большинство проверок помечены experimental и по умолчанию не работают (`experimental-checks: false`): все MultiActions (вкл. новые H–S), PacketOrder, Sprint B–H, ElytraD–Q, BadPacketsC/H/M/P/R/V/X/Z и др. Включение — главный рычаг ужесточения, но с риском ложных срабатываний.
 
+### Исправления после ревью (13.11.2026)
+
+- **InventoryD (InvMove) не срабатывала вообще:** искала `MoveVectorData`, который движок предсказаний больше не создаёт. Теперь смотрит `predictedVelocity.input` и (1.21.2+) клавиши из `PLAYER_INPUT`, с грейсом 100 мс после открытия окна.
+- **Timer/TimerLimit — ложные откаты после лагов сети:** TimerLimit обрезал «запас» до 1 с, и пачка пакетов после фриза Wi-Fi/мобильной сети давала откаты. Теперь время полного молчания клиента засчитывается (до `TimerLimit.max-lag-spike-credit`, 3000 мс), неподвижные тики после лага не флагаются (из kinchinmatheus). Timer (A) не менялся. config-version 17.
+- Проверено ботом (mineflayer, фриз отправки 2–3 с): было 10 откатов → 0; таймер ×1.3/×2 ловится как раньше (Timer x40/x198 за 5 с). Изменение MarvinSur (не считать пакеты во время отката) отклонено: чит переставал набирать VL и не кикался.
+
 ## Открытые задачи и идеи
 
 1. Включены experimental-проверки с наименьшим риском (config v16, миграция дописывает их в пустой список у существующих серверов): BadPacketsH, BadPacketsZ, ElytraQ, MultiActionsI/J/K/L/N/P/Q. Не включены (риск выше: непрерывное состояние, граница открытия окна, пинг): MultiActionsH/M/O/S, SprintH, PacketOrder*, остальные Sprint/Elytra/BadPackets.

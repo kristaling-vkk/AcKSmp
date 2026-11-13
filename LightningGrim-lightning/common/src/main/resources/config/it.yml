@@ -168,6 +168,9 @@ TimerLimit:
     # Può causare alcuni setback per i giocatori legittimi, ma solo se superano questa soglia di ping.
     # -1 per disattivare
     ping-abuse-limit-threshold: 1000
+    # Milliseconds of complete client silence (Wi-Fi/mobile freeze) credited as real elapsed time, so the burst of
+    # packets sent after a lag spike is not set back. No more ticks than time passed can be accepted. 0 to disable
+    max-lag-spike-credit: 3000
 
 NegativeTimer:
     # Millisecondi persi prima di rilevare il timer negativo
@@ -347,4 +350,4 @@ max-ping-firework-boost: 1000
 update-permission-ticks: -1
 
 config-flavor: V2
-config-version: 16
+config-version: 17

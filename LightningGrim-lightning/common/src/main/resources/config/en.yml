@@ -175,6 +175,9 @@ TimerLimit:
     # Can cause some setbacks for legitimate players but only if they are over this ping threshold.
     # -1 to disable
     ping-abuse-limit-threshold: 1000
+    # Milliseconds of complete client silence (Wi-Fi/mobile freeze) credited as real elapsed time, so the burst of
+    # packets sent after a lag spike is not set back. No more ticks than time passed can be accepted. 0 to disable
+    max-lag-spike-credit: 3000
 
 NegativeTimer:
     # Number of milliseconds lost while moving before we should start flagging
@@ -397,7 +400,7 @@ update-permission-ticks: -1
 #   config-version: bumped on every breaking shape change. Old configs
 #                   auto-migrate up via the bundled updater on next start.
 config-flavor: V2
-config-version: 16
+config-version: 17
 
 # Server-side guards (Paper/Folia; ported from LegacyGrim, tightening patches only)
 # Block ender pearl throws at point blank into a solid wall/ceiling (pearl phasing)

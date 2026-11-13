@@ -63,6 +63,8 @@ public class Timer extends Check implements PrePredictionPacketReceiveListener {
             hasGottenMovementAfterTransaction = false;
         }
 
+        onClientPacket(event);
+
         if (!shouldCountPacketForTimer(event.getPacketType())) return;
 
         hasGottenMovementAfterTransaction = true;
@@ -90,6 +92,10 @@ public class Timer extends Check implements PrePredictionPacketReceiveListener {
         }
 
         limitFallBehind();
+    }
+
+    /** Called for every packet from the client before it is counted. */
+    protected void onClientPacket(final PacketReceiveEvent event) {
     }
 
     protected void limitFallBehind() {
