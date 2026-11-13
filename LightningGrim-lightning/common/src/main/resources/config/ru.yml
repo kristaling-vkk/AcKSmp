@@ -252,6 +252,9 @@ Reach:
     # Должны ли мы отменять удары, которые, как мы знаем, невозможны?
     # Удары 3.00-3.03 могут пройти, но все равно будут замечены из-за ограничений на порядок пакетов.
     block-impossible-hits: true
+    # Отменять удары, пока игрок держит неотвеченную транзакцию дольше стольких миллисекунд (backtrack / fake lag:
+    # удары засчитываются по позициям целей, которые игрок подтвердил транзакциями). -1 — выключить
+    max-transaction-delay-ms: 1000
     # Sends an additional packet at the end of every tick to increase the likelihood of catching cheats.
     # Injects into server's connection list to send a final packet just before the server flushes.
     # Increases bandwidth usage for all players but does not decrease overall server performance.
@@ -268,6 +271,19 @@ exploit:
     # Эта опция смягчает размещение игрока на блоках-призраках, ресинхронизируя его, когда это происходит.
     allow-building-on-ghostblocks: true
     distance-to-check-if-ghostblocks: 2
+    # Лимиты пакетов против крашей и лагов (из SolunaMC/Grim; проверки ExploitC/D/E, ChatF, CrashB, CrashH). 0 — без лимита.
+    max-sign-line-length: 100
+    max-sign-length: 256
+    sign-block-control-characters: true
+    sign-block-format-codes: false
+    payloads-per-second: 500
+    max-payload-bytes: 1048576
+    blocked-payload-channels: []
+    max-item-packet-bytes: 2097152
+    max-item-nbt-depth: 128
+    commands-per-second: 20
+    max-command-length: 2048
+    tab-completes-per-second: 100
 
 # Включить запись в журнал плагинов, которые внедрились в netty при присоединении для отладки проблем совместимости
 debug-pipeline-on-join: false

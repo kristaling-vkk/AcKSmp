@@ -271,6 +271,10 @@ Reach:
     # 如果 Reach 因延迟/插值而产生误报，请增加此值。 0.0 = 默认（严格）。
     extra-expansion: 0.01
     block-impossible-hits: true
+    # Cancel hits while the player has left a transaction unanswered for longer than this many milliseconds.
+    # Hits are judged against where targets were when the player last answered, so holding transactions
+    # (backtrack, fake lag) lets a cheat hit where targets were seconds ago. -1 to disable
+    max-transaction-delay-ms: 1000
     # 我们应该取消不合法的攻击吗？
     # 攻击距离为3.00-3.03可能不会被取消，但仍会被作弊标记，因为有数据包顺序限制
     # Sends an additional packet at the end of every tick to increase the likelihood of catching cheats.
@@ -297,6 +301,19 @@ exploit:
     allow-building-on-ghostblocks: true
     # 该选项可在发生假方块时重新同步玩家方块，并允许玩家在假方块上继续放置方块
     distance-to-check-if-ghostblocks: 2
+    # Packet limits against crash/lag exploits (from SolunaMC/Grim; checks ExploitC/D/E, ChatF, CrashB, CrashH). 0 disables a limit.
+    max-sign-line-length: 100
+    max-sign-length: 256
+    sign-block-control-characters: true
+    sign-block-format-codes: false
+    payloads-per-second: 500
+    max-payload-bytes: 1048576
+    blocked-payload-channels: []
+    max-item-packet-bytes: 2097152
+    max-item-nbt-depth: 128
+    commands-per-second: 20
+    max-command-length: 2048
+    tab-completes-per-second: 100
     # 检查假方块的距离。
     # 范围限制为 2 到 4
 

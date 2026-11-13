@@ -251,6 +251,10 @@ Reach:
     # Moeten we hits annuleren waarvan we weten dat ze onmogelijk zijn?
     # 3.00-3.03 hits kunnen doorkomen, maar toch gemarkeerd worden, vanwege pakketvolgorderbeperkingen
     block-impossible-hits: true
+    # Cancel hits while the player has left a transaction unanswered for longer than this many milliseconds.
+    # Hits are judged against where targets were when the player last answered, so holding transactions
+    # (backtrack, fake lag) lets a cheat hit where targets were seconds ago. -1 to disable
+    max-transaction-delay-ms: 1000
     # Sends an additional packet at the end of every tick to increase the likelihood of catching cheats.
     # Injects into server's connection list to send a final packet just before the server flushes.
     # Increases bandwidth usage for all players but does not decrease overall server performance.
@@ -272,6 +276,19 @@ exploit:
     # Deze instelling, beïnvloed door de boolean hierboven, bepaalt de afstand om te controleren op ghostblocks
     # Het geldige bereik is beperkt van 2 tot 4
     distance-to-check-if-ghostblocks: 2
+    # Packet limits against crash/lag exploits (from SolunaMC/Grim; checks ExploitC/D/E, ChatF, CrashB, CrashH). 0 disables a limit.
+    max-sign-line-length: 100
+    max-sign-length: 256
+    sign-block-control-characters: true
+    sign-block-format-codes: false
+    payloads-per-second: 500
+    max-payload-bytes: 1048576
+    blocked-payload-channels: []
+    max-item-packet-bytes: 2097152
+    max-item-nbt-depth: 128
+    commands-per-second: 20
+    max-command-length: 2048
+    tab-completes-per-second: 100
 
 # Logging plugins inschakelen die geïnjecteerd zijn in netty on join om compatibiliteitsproblemen te debuggen
 debug-pipeline-on-join: false

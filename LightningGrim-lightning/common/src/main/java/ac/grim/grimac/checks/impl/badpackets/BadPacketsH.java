@@ -1,5 +1,6 @@
 package ac.grim.grimac.checks.impl.badpackets;
 
+import ac.grim.grimac.GrimAPI;
 import ac.grim.grimac.api.storage.verbose.Verbose;
 import ac.grim.grimac.checks.CheckData;
 import ac.grim.grimac.checks.type.BlockBreakListener;
@@ -38,6 +39,8 @@ public class BadPacketsH extends BlockPlaceCheck implements PacketReceiveListene
                 && shouldCancel(new WrapperPlayClientUseItem(event).getSequence())) {
             event.setCancelled(true);
             player.onPacketCancel();
+            // Out-of-sequence use-item packets are a NoSlow vector: end the item use server-side too (from BetterGrim)
+            GrimAPI.INSTANCE.getItemResetHandler().resetItemUsage(player.platformPlayer);
         }
     }
 
