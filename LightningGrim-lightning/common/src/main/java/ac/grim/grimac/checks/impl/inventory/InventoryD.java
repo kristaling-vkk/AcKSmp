@@ -5,8 +5,8 @@ import ac.grim.grimac.checks.type.InventoryCheck;
 import ac.grim.grimac.checks.type.PostPredictionListener;
 import ac.grim.grimac.player.GrimPlayer;
 import ac.grim.grimac.utils.anticheat.update.PredictionComplete;
-import ac.grim.grimac.utils.data.VectorData;
-import ac.grim.grimac.utils.data.VectorData.MoveVectorData;
+import ac.grim.grimac.utils.data.KnownInput;
+import ac.grim.grimac.utils.math.Vector3dm;
 import ac.grim.grimac.utils.data.VehicleData;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
@@ -62,10 +62,19 @@ public class InventoryD extends InventoryCheck implements PostPredictionListener
                 isJumping = !vehicle.pendingJumps.isEmpty() && horseJumpVerbose++ >= 1;
                 isMoving = vehicle.nextVehicleForward != 0 || vehicle.nextVehicleHorizontal != 0;
             } else {
-                MoveVectorData move = findMovement(player.predictedVelocity);
-
+                // The prediction engine records the chosen input on VectorData.input (MoveVectorData is no longer
+                // produced since the upstream prediction rewrite, which left this check unable to ever see movement).
+                Vector3dm input = player.predictedVelocity.input;
                 isJumping = player.predictedVelocity.isJump();
-                isMoving = move != null && (move.x != 0 || move.z != 0);
+                isMoving = input != null && (input.getX() != 0 || input.getZ() != 0);
+
+                // 1.21.2+ clients report their held movement keys every tick; a vanilla client releases them all
+                // when a screen opens. Give the opening tick a short grace for keys sent before the screen showed.
+                if (player.supportsEndTick() && System.currentTimeMillis() - player.lastInventoryOpen > 100L) {
+                    KnownInput keys = player.packetStateData.knownInput;
+                    isMoving |= keys.movingNoJump();
+                    isJumping |= keys.jump() && player.lastOnGround;
+                }
             }
 
             if (!isMoving && !isJumping) {
@@ -88,20 +97,5 @@ public class InventoryD extends InventoryCheck implements PostPredictionListener
         } else {
             horseJumpVerbose = 0;
         }
-    }
-
-    private MoveVectorData findMovement(VectorData vectorData) {
-        if (vectorData instanceof MoveVectorData) {
-            return (MoveVectorData) vectorData;
-        }
-
-        while (vectorData != null) {
-            vectorData = vectorData.lastVector;
-            if (vectorData instanceof MoveVectorData) {
-                return (MoveVectorData) vectorData;
-            }
-        }
-
-        return null;
     }
 }
