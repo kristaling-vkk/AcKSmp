@@ -1,0 +1,33 @@
+# Lightweight check that runs on every pull request to main.
+# It gives GitHub something to wait for, so "auto-merge" can be enabled on PRs:
+# the PR merges by itself once this check passes.
+name: check
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check-jar:
+    name: check-jar
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Plugin jar is a valid Bukkit/Paper plugin
+        run: |
+          set -euo pipefail
+          jar=dist/GroundedGrim-2.3.75-purpur-1.21.11.jar
+          test -s "$jar" || { echo "::error::$jar is missing or empty"; exit 1; }
+          unzip -tq "$jar"
+          unzip -p "$jar" plugin.yml > plugin.yml
+          main=$(sed -n 's/^main: *//p' plugin.yml | tr -d '"\r')
+          test -n "$main" || { echo "::error::plugin.yml has no main class"; exit 1; }
+          unzip -l "$jar" "${main//.//}.class" > /dev/null || { echo "::error::main class $main is not in the jar"; exit 1; }
+          echo "OK: $(sed -n 's/^name: *//p' plugin.yml) $(sed -n 's/^version: *//p' plugin.yml), main=$main"
