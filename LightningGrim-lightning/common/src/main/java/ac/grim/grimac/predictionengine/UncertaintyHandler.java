@@ -389,15 +389,15 @@ public class UncertaintyHandler {
 
     private boolean hasHardCollision() {
         SimpleCollisionBox expandedBB = player.boundingBox.copy().expand(1);
-        return regularHardCollision(expandedBB) || striderCollision(expandedBB) || boatCollision(expandedBB);
+        // Entities in our own vehicle stack move with us and can't be collided with (vanilla's isPassengerOfSameVehicle)
+        // Shulker boxes are tracked separately here (lastShulkerBoxNearby)
+        PacketEntity root = player.compensatedEntities.self.getRootVehicle();
+        return regularHardCollision(expandedBB, root) || striderCollision(expandedBB, root) || boatCollision(expandedBB, root);
     }
 
-    private boolean regularHardCollision(SimpleCollisionBox expandedBB) {
-        final PacketEntity riding = player.compensatedEntities.self.getRiding();
+    private boolean regularHardCollision(SimpleCollisionBox expandedBB, PacketEntity root) {
         for (PacketEntity entity : player.compensatedEntities.entityMap.values()) {
-            // Passengers of our own vehicle move with it and can't be collided with, don't give them lenience
-            if ((entity.isBoat || entity.getType() == EntityTypes.SHULKER || entity.isHappyGhast) && entity != riding
-                    && (riding == null || !riding.hasPassenger(entity))
+            if ((entity.isBoat || entity.getType() == EntityTypes.SHULKER || entity.isHappyGhast) && entity.getRootVehicle() != root
                     && entity.getPossibleCollisionBoxes().isIntersected(expandedBB)) {
                 return true;
             }
@@ -406,27 +406,27 @@ public class UncertaintyHandler {
         return false;
     }
 
-    private boolean striderCollision(SimpleCollisionBox expandedBB) {
+    private boolean striderCollision(SimpleCollisionBox expandedBB, PacketEntity root) {
         // Stiders can walk on top of other striders
-        if (player.compensatedEntities.self.getRiding() instanceof PacketEntityStrider) {
-            for (PacketEntity entity : player.compensatedEntities.entityMap.values()) {
-                if (entity.getType() == EntityTypes.STRIDER && entity != player.compensatedEntities.self.getRiding()
-                        && !entity.hasPassenger(entity) && entity.getPossibleCollisionBoxes().isIntersected(expandedBB)) {
-                    return true;
-                }
+        if (!(player.compensatedEntities.self.getRiding() instanceof PacketEntityStrider)) return false;
+
+        for (PacketEntity entity : player.compensatedEntities.entityMap.values()) {
+            if (entity.getType() == EntityTypes.STRIDER && entity.getRootVehicle() != root
+                    && entity.getPossibleCollisionBoxes().isIntersected(expandedBB)) {
+                return true;
             }
         }
 
         return false;
     }
 
-    private boolean boatCollision(SimpleCollisionBox expandedBB) {
+    private boolean boatCollision(SimpleCollisionBox expandedBB, PacketEntity root) {
         // Boats can collide with quite literally anything
         final PacketEntity riding = player.compensatedEntities.self.getRiding();
         if (riding == null || !riding.isBoat) return false;
 
         for (PacketEntity entity : player.compensatedEntities.entityMap.values()) {
-            if (entity != riding && entity.isPushable() && !riding.hasPassenger(entity)
+            if (entity.isPushable() && entity.getRootVehicle() != root
                     && entity.getPossibleCollisionBoxes().isIntersected(expandedBB)) {
                 return true;
             }
