@@ -16,8 +16,12 @@ import java.util.LinkedList;
 
 @CheckData(name = "BadPacketsO", stableKey = "grim.badpackets.invalid_keepalive", description = "Responded with a keepalive ID that was not sent by the server")
 public class BadPacketsO extends Check implements PacketReceiveListener, PacketSendListener {
-    private static final Verbose V = Verbose.of("id={slong}");
-    private static final Verbose SKIPPED = Verbose.of("skipped={sint}");
+    private static final int UNKNOWN_ID = 0;
+    private static final int SKIPPED = 1;
+    // One template per check: a second Verbose.of() for the same check replaces the first in the registry
+    private static final Verbose V = Verbose
+            .of("id={slong}")       // UNKNOWN_ID
+            .or("skipped={sint}");  // SKIPPED
 
     private final LinkedList<Long> keepalives = new LinkedList<>();
 
@@ -55,8 +59,8 @@ public class BadPacketsO extends Check implements PacketReceiveListener, PacketS
             }
 
             boolean flagged = skipped == -1
-                    ? flag(V.write(verbose()).slong(id))
-                    : skipped != 0 && flag(SKIPPED.write(verbose()).sint(skipped));
+                    ? flag(V.write(verbose(), UNKNOWN_ID).slong(id))
+                    : skipped != 0 && flag(V.write(verbose(), SKIPPED).sint(skipped));
 
             if (flagged && shouldModifyPackets()) {
                 event.setCancelled(true);
