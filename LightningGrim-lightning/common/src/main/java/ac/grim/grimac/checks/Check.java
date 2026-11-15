@@ -171,11 +171,11 @@ public class Check extends GrimProcessor implements AbstractCheck {
     }
 
     private boolean recordFlag(@NotNull BinaryVerbose verbose) {
-        Supplier<String> rendered = verbose.rendered();
-        byte[] verboseData = verbose.data();
-
         if (!configEnabled || player.disableGrim || (experimental && !player.isExperimentalChecks() && !experimentalOverride) || exemptPermission)
             return false; // Avoid calling event if disabled
+
+        Supplier<String> rendered = verbose.rendered();
+        byte[] verboseData = verbose.data();
 
         if (FLAG_CHANNEL.fire(player, this, rendered)) return false;
 
