@@ -158,6 +158,9 @@ Knockback:
     max-advantage: 1
     # This is to stop the player from gathering too many violations and never being able to clear them all
     max-ceiling: 4
+    # Violations before the player is set back and the knockback is forced on them.
+    # Used to be 10, which let a full velocity cancel ignore ten hits for free
+    setbackvl: 3
 
 Explosion:
     threshold: 0.001
@@ -400,7 +403,7 @@ update-permission-ticks: -1
 #   config-version: bumped on every breaking shape change. Old configs
 #                   auto-migrate up via the bundled updater on next start.
 config-flavor: V2
-config-version: 17
+config-version: 18
 
 # Server-side guards (Paper/Folia; ported from LegacyGrim, tightening patches only)
 # Block ender pearl throws at point blank into a solid wall/ceiling (pearl phasing)

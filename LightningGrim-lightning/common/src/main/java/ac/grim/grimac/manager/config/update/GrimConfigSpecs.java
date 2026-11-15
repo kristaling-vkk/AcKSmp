@@ -74,9 +74,11 @@ public final class GrimConfigSpecs {
      * already filled in is left untouched.
      *
      * <p>v16 → v17: adds {@code TimerLimit.max-lag-spike-credit}. No explicit migration is needed.
+     *
+     * <p>v17 → v18: adds {@code Knockback.setbackvl} (3). No explicit migration is needed.
      */
     public static @NotNull ConfigUpdater.Spec mainConfig() {
-        return ConfigUpdater.Spec.builder("/config/", 17, ConfigUpdater.ConfigFlavor.V2)
+        return ConfigUpdater.Spec.builder("/config/", 18, ConfigUpdater.ConfigFlavor.V2)
                 .migration(10, ctx -> {
                     String typeRaw = ctx.input().getString("history.database.type");
                     String type = typeRaw == null ? null : typeRaw.trim().toUpperCase(Locale.ROOT);

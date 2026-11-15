@@ -23,7 +23,7 @@ import java.util.Deque;
 import java.util.LinkedList;
 
 // We are making a velocity sandwich between two pieces of transaction packets (bread)
-@CheckData(name = "AntiKB", stableKey = "grim.velocity.anti_knockback", alternativeName = "AntiKnockback", configName = "Knockback", description = "Did not take the expected entity knockback", setback = 10, decay = 0.025)
+@CheckData(name = "AntiKB", stableKey = "grim.velocity.anti_knockback", alternativeName = "AntiKnockback", configName = "Knockback", description = "Did not take the expected entity knockback", setback = 3, decay = 0.025)
 public class KnockbackHandler extends Check implements PacketSendListener, PostPredictionListener {
     private static final Verbose V = Verbose.of("[ignored knockback|o: {offset}]");
 
@@ -224,8 +224,15 @@ public class KnockbackHandler extends Check implements PacketSendListener, PostP
                         reward();
                     }
                 }
-            } else if (threshold > 0.05) {
-                threshold *= multiplier;
+            } else {
+                // Knockback taken as expected: let old violations wear off, so a rare false flag does not
+                // leave a legitimate player one flag away from setbacks for the rest of the session
+                if (!player.likelyKB.isSetback) {
+                    reward();
+                }
+                if (threshold > 0.05) {
+                    threshold *= multiplier;
+                }
             }
         }
     }
