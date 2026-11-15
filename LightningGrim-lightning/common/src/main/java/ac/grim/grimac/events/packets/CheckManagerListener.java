@@ -954,8 +954,10 @@ public class CheckManagerListener extends PacketListenerAbstract {
         player.queuedBreaks.add(blockBreak);
 
         // Creative clients break blocks on START_DIGGING; a FINISHED_DIGGING in creative must not predict air
-        // (otherwise a modified client could make Grim believe in ghost air blocks)
-        if (action == DiggingAction.FINISHED_DIGGING && player.gamemode != GameMode.CREATIVE && isBreakable(blockBreak.block.getType())) {
+        // (otherwise a modified client could make Grim believe in ghost air blocks). Only predict breaks of a block
+        // whose digging actually started, so a fake break can't open a hole for WallHit (GroundedGrim 94027253f)
+        if (action == DiggingAction.FINISHED_DIGGING && player.gamemode != GameMode.CREATIVE && isBreakable(blockBreak.block.getType())
+                && player.compensatedWorld.canPredictBlockBreak(blockBreak.position)) {
             player.compensatedWorld.startPredicting();
             player.compensatedWorld.updateBlock(blockBreak.position.x, blockBreak.position.y, blockBreak.position.z, 0);
             player.compensatedWorld.stopPredicting(packet);
@@ -985,6 +987,9 @@ public class CheckManagerListener extends PacketListenerAbstract {
                     player.compensatedWorld.updateBlock(blockBreak.position.x, blockBreak.position.y, blockBreak.position.z, 0);
                 }
                 player.compensatedWorld.stopPredicting(packet);
+            } else {
+                // An instant break does not replace vanilla's resumable mining target.
+                player.compensatedWorld.recordBlockBreakStart(blockBreak.position);
             }
         }
 
