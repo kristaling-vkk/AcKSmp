@@ -158,6 +158,9 @@ Knockback:
     max-advantage: 1
     # Dies soll verhindern, dass der Spieler zu viele Verstöße sammelt und nie in der Lage ist, sie alle zu beseitigen.
     max-ceiling: 4
+    # Violations before the player is set back and the knockback is forced on them.
+    # Used to be 10, which let a full velocity cancel ignore ten hits for free
+    setbackvl: 3
 
 Explosion:
     threshold: 0.001
@@ -363,4 +366,4 @@ max-ping-firework-boost: 1000
 update-permission-ticks: -1
 
 config-flavor: V2
-config-version: 17
+config-version: 18

@@ -272,7 +272,7 @@ Punishments:
       - "Knockback"
       - "Explosion"
     commands:
-      - "5:5 [alert]"
+      - "2:2 [alert]"
       - "1:1 [log]"
       - "20:20 [webhook]"
       - "20:20 [proxy]"
