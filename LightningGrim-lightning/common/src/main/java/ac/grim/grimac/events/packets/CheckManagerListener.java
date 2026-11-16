@@ -467,7 +467,7 @@ public class CheckManagerListener extends PacketListenerAbstract {
 
             if (player.packetStateData.isReceivingQueuedDuplicate) {
                 teleportData = new TeleportAcceptData();
-                if (player.packetStateData.lastPacketWasOnePointSeventeenDuplicate) {
+                if (player.packetStateData.queuedDuplicateIsDuplicate) {
                     handleDuplicatePacket(player, event, flying);
                 }
                 break flying;
