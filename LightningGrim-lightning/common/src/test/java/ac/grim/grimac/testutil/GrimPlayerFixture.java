@@ -1,9 +1,11 @@
 package ac.grim.grimac.testutil;
 
+import ac.grim.grimac.checks.impl.combat.Reach;
 import ac.grim.grimac.events.packets.PacketWorldBorder;
 import ac.grim.grimac.manager.CheckManager;
 import ac.grim.grimac.manager.SetbackTeleportUtil;
 import ac.grim.grimac.player.GrimPlayer;
+import ac.grim.grimac.predictionengine.predictions.input.impl.ModernInputTransformer;
 import ac.grim.grimac.utils.data.PacketStateData;
 import ac.grim.grimac.utils.data.packetentity.PacketEntitySelf;
 import ac.grim.grimac.utils.enums.Pose;
@@ -16,6 +18,7 @@ import com.github.retrooper.packetevents.protocol.attribute.Attributes;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.protocol.player.GameMode;
 import com.github.retrooper.packetevents.settings.PacketEventsSettings;
+import io.github.retrooper.packetevents.impl.netty.NettyManagerImpl;
 
 import java.lang.reflect.Field;
 import java.util.HashSet;
@@ -30,9 +33,18 @@ public final class GrimPlayerFixture {
 
     public static void initializePacketEvents() {
         PacketEventsAPI<?> api = mock(PacketEventsAPI.class, RETURNS_DEEP_STUBS);
-        when(api.getServerManager().getVersion()).thenReturn(ServerVersion.V_1_21_4);
+        when(api.getServerManager().getVersion()).thenReturn(ServerVersion.V_1_21_11);
         when(api.getSettings()).thenReturn(new PacketEventsSettings());
+        when(api.getNettyManager()).thenReturn(new NettyManagerImpl());
         PacketEvents.setAPI(api);
+        // Initialize server-version gates before tests select a packet version.
+        try {
+            Class.forName(Reach.class.getName());
+            Class.forName(ModernInputTransformer.class.getName());
+        } catch (ClassNotFoundException e) {
+            throw new AssertionError(e);
+        }
+        when(api.getServerManager().getVersion()).thenReturn(ServerVersion.V_1_21_4);
         Attributes.SCALE.getName();
     }
 

@@ -13,6 +13,7 @@ import ac.grim.grimac.utils.change.BlockModification;
 import ac.grim.grimac.utils.data.*;
 import ac.grim.grimac.utils.inventory.Inventory;
 import ac.grim.grimac.utils.latency.CompensatedWorld;
+import ac.grim.grimac.utils.math.GrimMath;
 import ac.grim.grimac.utils.math.VectorUtils;
 import ac.grim.grimac.utils.nmsutil.*;
 import com.github.retrooper.packetevents.PacketEvents;
@@ -128,9 +129,27 @@ public class CheckManagerListener extends PacketListenerAbstract {
                 player.pitch = pitch;
             }
 
+            // 1.21 put the rotation the item is used with in the packet, and the server turns the player to it first
+            final float lookYaw = player.yaw;
+            final float lookPitch = player.pitch;
+            boolean packetRotation = false;
+            if (snapshot.wrapper() instanceof WrapperPlayClientUseItem useItem
+                    && player.getClientVersion().isNewerThanOrEquals(ClientVersion.V_1_21)
+                    && PacketEvents.getAPI().getServerManager().getVersion().isNewerThanOrEquals(ServerVersion.V_1_21)
+                    && Float.isFinite(useItem.getYaw()) && Float.isFinite(useItem.getPitch())) {
+                packetRotation = true;
+                player.yaw = useItem.getYaw();
+                player.pitch = GrimMath.clamp(useItem.getPitch(), -90, 90);
+            }
+
             player.compensatedWorld.startPredicting();
             handleBlockPlaceOrUseItem(player, snapshot.wrapper());
             player.compensatedWorld.stopPredicting(snapshot.wrapper());
+
+            if (packetRotation) {
+                player.yaw = lookYaw;
+                player.pitch = lookPitch;
+            }
 
             player.x = lastX;
             player.y = lastY;
@@ -448,7 +467,7 @@ public class CheckManagerListener extends PacketListenerAbstract {
 
             if (player.packetStateData.isReceivingQueuedDuplicate) {
                 teleportData = new TeleportAcceptData();
-                if (player.packetStateData.lastPacketWasOnePointSeventeenDuplicate) {
+                if (player.packetStateData.queuedDuplicateIsDuplicate) {
                     handleDuplicatePacket(player, event, flying);
                 }
                 break flying;
@@ -935,8 +954,10 @@ public class CheckManagerListener extends PacketListenerAbstract {
         player.queuedBreaks.add(blockBreak);
 
         // Creative clients break blocks on START_DIGGING; a FINISHED_DIGGING in creative must not predict air
-        // (otherwise a modified client could make Grim believe in ghost air blocks)
-        if (action == DiggingAction.FINISHED_DIGGING && player.gamemode != GameMode.CREATIVE && isBreakable(blockBreak.block.getType())) {
+        // (otherwise a modified client could make Grim believe in ghost air blocks). Only predict breaks of a block
+        // whose digging actually started, so a fake break can't open a hole for WallHit (GroundedGrim 94027253f)
+        if (action == DiggingAction.FINISHED_DIGGING && player.gamemode != GameMode.CREATIVE && isBreakable(blockBreak.block.getType())
+                && player.compensatedWorld.canPredictBlockBreak(blockBreak.position)) {
             player.compensatedWorld.startPredicting();
             player.compensatedWorld.updateBlock(blockBreak.position.x, blockBreak.position.y, blockBreak.position.z, 0);
             player.compensatedWorld.stopPredicting(packet);
@@ -966,6 +987,9 @@ public class CheckManagerListener extends PacketListenerAbstract {
                     player.compensatedWorld.updateBlock(blockBreak.position.x, blockBreak.position.y, blockBreak.position.z, 0);
                 }
                 player.compensatedWorld.stopPredicting(packet);
+            } else {
+                // An instant break does not replace vanilla's resumable mining target.
+                player.compensatedWorld.recordBlockBreakStart(blockBreak.position);
             }
         }
 

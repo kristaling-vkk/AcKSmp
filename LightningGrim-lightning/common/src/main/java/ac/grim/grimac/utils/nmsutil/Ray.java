@@ -18,18 +18,10 @@ public record Ray(@NotNull Vector3d origin, @NotNull Vector3d direction) impleme
         this(new Vector3d(x, y, z), calculateDirection(player, xRot, yRot));
     }
 
-    // Account for FastMath by using player's trig handler
-    // Copied from hawk which probably copied it from NMS
+    // Version-specific look vector, matching the client's own math (upstream 73eee60fc)
     public static @NotNull Vector3d calculateDirection(@NotNull GrimPlayer player, float xRot, float yRot) {
-        float rotX = (float) Math.toRadians(xRot);
-        float rotY = (float) Math.toRadians(yRot);
-        double xz = player.trigHandler.cos(rotY);
-
-        return new Vector3d(
-                -xz * player.trigHandler.sin(rotX),
-                -player.trigHandler.sin(rotY),
-                xz * player.trigHandler.cos(rotX)
-        );
+        Vector3dm look = ReachUtils.getLook(player, xRot, yRot);
+        return new Vector3d(look.getX(), look.getY(), look.getZ());
     }
 
     @Contract(" -> this")

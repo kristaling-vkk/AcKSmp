@@ -88,6 +88,7 @@ public class CompensatedWorld implements PacketWorld {
     private final Int2ObjectMap<List<Vector3i>> serverIsCurrentlyProcessingThesePredictions = new Int2ObjectOpenHashMap<>();
     private final Object2ObjectLinkedOpenHashMap<Pair<Vector3i, DiggingAction>, Vector3d> unackedActions = new Object2ObjectLinkedOpenHashMap<>();
     private boolean isCurrentlyPredicting = false;
+    private Vector3i blockBreakTarget;
     public boolean isRaining = false;
 
     private final boolean noNegativeBlocks;
@@ -98,19 +99,42 @@ public class CompensatedWorld implements PacketWorld {
         noNegativeBlocks = player.getClientVersion().isOlderThanOrEquals(ClientVersion.V_1_16_4);
     }
 
+    public void recordBlockBreakStart(Vector3i position) {
+        blockBreakTarget = position;
+    }
+
+    public boolean canPredictBlockBreak(Vector3i position) {
+        // Modern clients can resume the last started block after CANCEL without another START.
+        return position.equals(blockBreakTarget);
+    }
+
+    public void clearBlockBreakTarget() {
+        blockBreakTarget = null;
+    }
+
     public void startPredicting() {
         if (player.getClientVersion().isOlderThanOrEquals(ClientVersion.V_1_18_2)) return; // No predictions
         this.isCurrentlyPredicting = true;
     }
 
     public void handlePredictionConfirmation(int prediction) {
-        for (Iterator<Int2ObjectMap.Entry<List<Vector3i>>> it = serverIsCurrentlyProcessingThesePredictions.int2ObjectEntrySet().iterator(); it.hasNext(); ) {
-            Map.Entry<Integer, List<Vector3i>> iter = it.next();
-            if (iter.getKey() <= prediction) {
-                applyBlockChanges(iter.getValue());
-                it.remove();
+        if (player.getClientVersion().isOlderThanOrEquals(ClientVersion.V_1_18_2)) return; // No predictions
+        // Nothing predicted and nothing waiting to be
+        if (serverIsCurrentlyProcessingThesePredictions.isEmpty() && player.placeUseItemPackets.isEmpty()) return;
+
+        // A place or use item is only replayed at the client's next movement packet or transaction, so the server can
+        // acknowledge it before we have predicted it. Look the predictions up once the client has this packet,
+        // by then anything it acknowledges has been replayed
+        player.sendTransaction();
+        player.latencyUtils.addRealTimeTask(player.lastTransactionSent.get(), () -> {
+            for (Iterator<Int2ObjectMap.Entry<List<Vector3i>>> it = serverIsCurrentlyProcessingThesePredictions.int2ObjectEntrySet().iterator(); it.hasNext(); ) {
+                Map.Entry<Integer, List<Vector3i>> iter = it.next();
+                if (iter.getKey() <= prediction) {
+                    revertPredictions(iter.getValue());
+                    it.remove();
+                }
             }
-        }
+        });
     }
 
     public void handleBlockBreakAck(Vector3i blockPos, int blockState, DiggingAction action, boolean accepted) {
@@ -133,7 +157,11 @@ public class CompensatedWorld implements PacketWorld {
 
     private void applyBlockChanges(List<Vector3i> toApplyBlocks) {
         player.sendTransaction();
-        player.latencyUtils.addRealTimeTask(player.lastTransactionSent.get(), () -> toApplyBlocks.forEach(vector3i -> {
+        player.latencyUtils.addRealTimeTask(player.lastTransactionSent.get(), () -> revertPredictions(toApplyBlocks));
+    }
+
+    private void revertPredictions(List<Vector3i> toApplyBlocks) {
+        toApplyBlocks.forEach(vector3i -> {
             BlockPrediction predictionData = originalServerBlocks.get(vector3i.getSerializedPosition());
 
             // We are the last to care about this prediction, remove it to stop memory leak
@@ -142,7 +170,7 @@ public class CompensatedWorld implements PacketWorld {
                 originalServerBlocks.remove(vector3i.getSerializedPosition());
                 handleAck(vector3i, predictionData.getOriginalBlockId(), predictionData.getPlayerPosition());
             }
-        }));
+        });
     }
 
     private void handleAck(Vector3i vector3i, int originalBlockId, Vector3d playerPosition) {
@@ -151,7 +179,7 @@ public class CompensatedWorld implements PacketWorld {
             player.blockHistory.add(
                     new BlockModification(
                             getBlock(vector3i),
-                            WrappedBlockState.getByGlobalId(originalBlockId),
+                            WrappedBlockState.getByGlobalId(blockVersion, originalBlockId),
                             vector3i,
                             GrimAPI.INSTANCE.getTickManager().currentTick,
                             BlockModification.Cause.HANDLE_NETTY_SYNC_TRANSACTION
@@ -161,7 +189,7 @@ public class CompensatedWorld implements PacketWorld {
             WrappedBlockState state = WrappedBlockState.getByGlobalId(blockVersion, originalBlockId);
 
             // The player will teleport themselves if they get stuck in the reverted block
-            if (playerPosition != null && CollisionData.getData(state.getType()).getMovementCollisionBox(player, player.getClientVersion(), state, vector3i.getX(), vector3i.getY(), vector3i.getZ()).isIntersected(player.boundingBox)) {
+            if (playerPosition != null && isStuckInRevertedBlock(vector3i, state)) {
                 player.lastX = player.x;
                 player.lastY = player.y;
                 player.lastZ = player.z;
@@ -170,6 +198,21 @@ public class CompensatedWorld implements PacketWorld {
                 player.z = playerPosition.getZ();
                 player.boundingBox = GetBoundingBox.getCollisionBoxForPlayer(player, player.x, player.y, player.z);
             }
+        }
+    }
+
+    // 1.16.2+ only goes back if the reverted block would leave it stuck, checked from where it is when the block comes back
+    // (Player.isColliding). Older clients always go back
+    private boolean isStuckInRevertedBlock(Vector3i pos, WrappedBlockState state) {
+        if (player.getClientVersion().isOlderThan(ClientVersion.V_1_16_2)) return true;
+
+        // Shapes like scaffolding pick their box from lastY, which is still where the player broke the block from
+        final double lastY = player.lastY;
+        player.lastY = player.y;
+        try {
+            return CollisionData.getData(state.getType()).getMovementCollisionBox(player, player.getClientVersion(), state, pos.getX(), pos.getY(), pos.getZ()).isIntersected(player.boundingBox);
+        } finally {
+            player.lastY = lastY;
         }
     }
 
@@ -215,6 +258,7 @@ public class CompensatedWorld implements PacketWorld {
     }
 
     public void clearPredictions() {
+        clearBlockBreakTarget();
         originalServerBlocks.clear();
         currentlyChangedBlocks = new LinkedList<>();
         serverIsCurrentlyProcessingThesePredictions.clear();
@@ -280,6 +324,10 @@ public class CompensatedWorld implements PacketWorld {
         updateBlock(pos.getX(), pos.getY(), pos.getZ(), state.getGlobalId());
     }
 
+    public void updateBlock(Vector3i pos, int combinedID) {
+        updateBlock(pos.getX(), pos.getY(), pos.getZ(), combinedID);
+    }
+
     public void updateBlock(int x, int y, int z, int combinedID) {
         Vector3i asVector = new Vector3i(x, y, z);
         BlockPrediction prediction = originalServerBlocks.get(asVector.getSerializedPosition());
@@ -343,6 +391,8 @@ public class CompensatedWorld implements PacketWorld {
                 }
                 // Copy-on-write: never mutate a shared section in place
                 chunk = ChunkSectionCache.detachSectionForWrite(column, sectionIndex, chunk);
+                chunk = ChunkSectionCache.ensureStorageCapacity(chunk);
+                column.chunks()[sectionIndex] = chunk;
                 chunk.set(x & 0xF, offsetY & 0xF, z & 0xF, combinedID);
                 player.compensatedGeysers.updateBlock(x, y, z, previousState, newState, minHeight);
 

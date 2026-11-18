@@ -80,7 +80,8 @@ public class ReachInterpolationData {
         // (ClientPacketListener passes 3; 1.21.5+ keeps 3 via InterpolationHandler). Keying off CLIENT version since
         // interpolation is client-side render lag. A wider count than vanilla = reach surplus, so match it exactly.
         if (entity.isBoat) return clientVersion.isNewerThanOrEquals(ClientVersion.V_1_21_2) ? 3 : 10;
-        if (entity.isMinecart) return 5;
+        // Minecarts moved to the generic 3-step lerp in 1.21.5 (upstream 6055c50be)
+        if (entity.isMinecart) return clientVersion.isOlderThan(ClientVersion.V_1_21_5) ? 5 : 3;
         if (entity.getType() == EntityTypes.SHULKER) return 1;
         if (entity.isLivingEntity) return 3;
         return 1;

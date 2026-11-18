@@ -43,7 +43,7 @@ public class VectorData {
     public IndexedVector3d stuckSpeedMultiplier = StuckSpeed.NONE;
 
     @Getter
-    private boolean isKnockback, firstBreadKb, isExplosion, firstBreadExplosion, isTrident, isZeroPointZeroThree, isSwimHop, isFlipSneaking, isFlipItem, isJump, isJumpFromGround, isAttackSlow = false, isWithInput = false;
+    private boolean isKnockback, firstBreadKb, isExplosion, firstBreadExplosion, isTrident, isZeroPointZeroThree, isSwimHop, isFlipSneaking, isFlipItem, isJump, isJumpFromGround, isAttackSlow, isWithInput, isFireworkBoost;
 
     // For handling replacing the type of vector it is while keeping data
     public VectorData(Vector3dm vector, VectorData lastVector, VectorType vectorType) {
@@ -65,6 +65,7 @@ public class VectorData {
             isJumpFromGround = lastVector.isJumpFromGround;
             preUncertainty = lastVector.preUncertainty;
             isAttackSlow = lastVector.isAttackSlow;
+            isFireworkBoost = lastVector.isFireworkBoost;
             input = lastVector.input;
             isWithInput = lastVector.isWithInput;
             stuckSpeedMultiplier = lastVector.stuckSpeedMultiplier;
@@ -100,7 +101,7 @@ public class VectorData {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         VectorData that = (VectorData) o;
-        return isKnockback == that.isKnockback && firstBreadKb == that.firstBreadKb && isExplosion == that.isExplosion && firstBreadExplosion == that.firstBreadExplosion && isTrident == that.isTrident && isZeroPointZeroThree == that.isZeroPointZeroThree && isSwimHop == that.isSwimHop && isFlipSneaking == that.isFlipSneaking && isFlipItem == that.isFlipItem && isJump == that.isJump && isAttackSlow == that.isAttackSlow && vectorType == that.vectorType && Objects.equals(lastVector, that.lastVector) && Objects.equals(preUncertainty, that.preUncertainty) && Objects.equals(vector, that.vector);
+        return isKnockback == that.isKnockback && firstBreadKb == that.firstBreadKb && isExplosion == that.isExplosion && firstBreadExplosion == that.firstBreadExplosion && isTrident == that.isTrident && isZeroPointZeroThree == that.isZeroPointZeroThree && isSwimHop == that.isSwimHop && isFlipSneaking == that.isFlipSneaking && isFlipItem == that.isFlipItem && isJump == that.isJump && isAttackSlow == that.isAttackSlow && isFireworkBoost == that.isFireworkBoost && vectorType == that.vectorType && Objects.equals(lastVector, that.lastVector) && Objects.equals(preUncertainty, that.preUncertainty) && Objects.equals(vector, that.vector) && Objects.equals(stuckSpeedMultiplier, that.stuckSpeedMultiplier);
     }
 
     @Override
@@ -126,6 +127,7 @@ public class VectorData {
             }
             case AttackSlow -> isAttackSlow = true;
             case WithInput -> isWithInput = true;
+            case Firework -> isFireworkBoost = true;
         }
     }
 
