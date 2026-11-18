@@ -324,6 +324,10 @@ public class CompensatedWorld implements PacketWorld {
         updateBlock(pos.getX(), pos.getY(), pos.getZ(), state.getGlobalId());
     }
 
+    public void updateBlock(Vector3i pos, int combinedID) {
+        updateBlock(pos.getX(), pos.getY(), pos.getZ(), combinedID);
+    }
+
     public void updateBlock(int x, int y, int z, int combinedID) {
         Vector3i asVector = new Vector3i(x, y, z);
         BlockPrediction prediction = originalServerBlocks.get(asVector.getSerializedPosition());
