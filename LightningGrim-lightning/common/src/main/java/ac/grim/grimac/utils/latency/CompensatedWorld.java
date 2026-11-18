@@ -151,7 +151,7 @@ public class CompensatedWorld implements PacketWorld {
             player.blockHistory.add(
                     new BlockModification(
                             getBlock(vector3i),
-                            WrappedBlockState.getByGlobalId(originalBlockId),
+                            WrappedBlockState.getByGlobalId(blockVersion, originalBlockId),
                             vector3i,
                             GrimAPI.INSTANCE.getTickManager().currentTick,
                             BlockModification.Cause.HANDLE_NETTY_SYNC_TRANSACTION
