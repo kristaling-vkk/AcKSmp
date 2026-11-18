@@ -109,9 +109,10 @@ public class OffsetHandler extends Check implements PostPredictionListener {
                     flags.incrementAndGet();
                     predictionComplete.setIdentifier(flagId);
 
-                    if ((advantageGained >= maxAdvantage || offset >= immediateSetbackThreshold)
+                    boolean firstViolation = isSetbackOnFirstViolation();
+                    if ((firstViolation || advantageGained >= maxAdvantage || offset >= immediateSetbackThreshold)
                             && !isNoSetbackPermission()
-                            && violations >= setbackViolationThreshold) {
+                            && (firstViolation || violations >= setbackViolationThreshold)) {
                         player.getSetbackTeleportUtil().executeViolationSetback();
                     }
                 }

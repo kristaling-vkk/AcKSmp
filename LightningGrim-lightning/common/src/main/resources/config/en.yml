@@ -341,6 +341,11 @@ exploit:
 # Enable logging plugins who have injected into netty on join to debug compatibility issues
 debug-pipeline-on-join: false
 
+# Set players back on the first violation of any check that can set back, instead of waiting for its setbackvl
+# (Simulation also stops waiting for max-advantage, AntiKB for its advantage threshold).
+# Strictest option: a single false flag also rubberbands a legit player. setbackvl: -1 on a check still disables its setbacks.
+setback-on-first-violation: true
+
 # Enables all experimental checks
 experimental-checks: false
 
@@ -405,7 +410,7 @@ update-permission-ticks: -1
 #   config-version: bumped on every breaking shape change. Old configs
 #                   auto-migrate up via the bundled updater on next start.
 config-flavor: V2
-config-version: 18
+config-version: 19
 
 # Server-side guards (Paper/Folia; ported from LegacyGrim, tightening patches only)
 # Block ender pearl throws at point blank into a solid wall/ceiling (pearl phasing)
