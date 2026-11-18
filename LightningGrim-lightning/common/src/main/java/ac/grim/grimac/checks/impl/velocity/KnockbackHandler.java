@@ -217,7 +217,7 @@ public class KnockbackHandler extends Check implements PacketSendListener, PostP
                 } else {
                     boolean ignored = player.likelyKB.offset == Integer.MAX_VALUE;
                     if (flag(V.write(verbose()).bool(ignored).f64(player.likelyKB.offset))) { // This velocity was sent by the server.
-                        if (player.likelyKB.offset >= immediate || threshold >= maxAdv) {
+                        if (isSetbackOnFirstViolation() || player.likelyKB.offset >= immediate || threshold >= maxAdv) {
                             setbackIfAboveSetbackVL();
                         }
                     } else {

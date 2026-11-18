@@ -141,6 +141,12 @@
 - **ManInMyVan / aidanvalero:** `87d531b65`, `b318bb217` (queued duplicate). Не перенесены: `328748919` (экономия памяти, перестраивает Check — у нас там своя логика), рефакторинг реестра пакетов, инструменты replay. SolunaMC — только renovate.
 - Тесты: common 371, bukkit 26 — все проходят. Боты на Purpur 1.21.11 ведут себя как до обновления.
 
+### Алерты и откаты с первого нарушения (18.11.2026)
+
+- `setback-on-first-violation: true` (config.yml, config-version 19): `Check.shouldSetback()` срабатывает при violations > 0 вместо > setbackvl; Simulation (OffsetHandler) не ждёт `max-advantage`/`setback-violation-threshold`; AntiKB не ждёт `immediate-setback-threshold`/`max-advantage`. `setbackvl: -1` у проверки по-прежнему отключает её откаты. Выключить — `false`.
+- Все `[alert]` и `[log]` в punishments/*.yml (11 языков) и в шаблонах групп WallHit/EntityPierce (LightningCombatPunishments, ConfigManagerFileImpl) — `1:1`. Кики (300, Timer 750) и мгновенные баны не менялись. На работающем сервере punishments.yml не перезаписывается — нужно удалить/переименовать файл и перезапустить.
+- Боты: честная ходьба/лаги/отдача — 0 флагов и 0 откатов; отмена отдачи — алерт и откат с первого удара; таймер ×1.3 — алерт на каждом нарушении (≈70 алертов за 5 с — заметный спам для персонала).
+
 ## Открытые задачи и идеи
 
 1. Включены experimental-проверки с наименьшим риском (config v16, миграция дописывает их в пустой список у существующих серверов): BadPacketsH, BadPacketsZ, ElytraQ, MultiActionsI/J/K/L/N/P/Q. Не включены (риск выше: непрерывное состояние, граница открытия окна, пинг): MultiActionsH/M/O/S, SprintH, PacketOrder*, остальные Sprint/Elytra/BadPackets.

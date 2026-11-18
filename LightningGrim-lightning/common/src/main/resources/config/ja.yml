@@ -311,6 +311,11 @@ exploit:
 # Nettyに参加時にプラグインが注入された場合の互換性問題をデバッグするためにログを有効にします
 debug-pipeline-on-join: false
 
+# Set players back on the first violation of any check that can set back, instead of waiting for its setbackvl
+# (Simulation also stops waiting for max-advantage, AntiKB for its advantage threshold).
+# Strictest option: a single false flag also rubberbands a legit player. setbackvl: -1 on a check still disables its setbacks.
+setback-on-first-violation: true
+
 # Enables all experimental checks
 experimental-checks: false
 
@@ -377,4 +382,4 @@ max-ping-firework-boost: 1000
 update-permission-ticks: -1
 
 config-flavor: V2
-config-version: 18
+config-version: 19

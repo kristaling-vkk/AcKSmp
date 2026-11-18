@@ -55,6 +55,9 @@ public class Check extends GrimProcessor implements AbstractCheck {
     private @NotNull String description;
     private double decay;
     private double setbackVL;
+    // setback-on-first-violation: set back on the first flag instead of waiting for setbackVL (setbackvl: -1 still disables)
+    private boolean setbackOnFirstViolation;
+    private boolean setbackDisabled;
     @Setter private boolean isEnabled;
 
     // permissions
@@ -259,8 +262,10 @@ public class Check extends GrimProcessor implements AbstractCheck {
                         .anyMatch(s -> s.equalsIgnoreCase(checkName) || s.equalsIgnoreCase(configName));
             }
 
+            setbackDisabled = setbackVL == -1;
             if (setbackVL == -1) setbackVL = Double.MAX_VALUE;
         }
+        setbackOnFirstViolation = configuration.getBooleanElse("setback-on-first-violation", false);
         onReload(new ChecksConfigView(configuration));
     }
 
@@ -280,7 +285,13 @@ public class Check extends GrimProcessor implements AbstractCheck {
     }
 
     public boolean shouldSetback() {
-        return !noSetbackPermission && violations > setbackVL;
+        if (noSetbackPermission || setbackDisabled) return false;
+        return setbackOnFirstViolation ? violations > 0 : violations > setbackVL;
+    }
+
+    /** True when the server wants every check to set back on its first flag. */
+    public boolean isSetbackOnFirstViolation() {
+        return setbackOnFirstViolation && !setbackDisabled;
     }
 
     public boolean executeViolationSetback() {
