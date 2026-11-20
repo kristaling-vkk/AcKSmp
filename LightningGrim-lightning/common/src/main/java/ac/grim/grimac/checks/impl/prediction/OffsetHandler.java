@@ -34,6 +34,7 @@ public class OffsetHandler extends Check implements PostPredictionListener {
     private double maxAdvantage;
     private double maxCeiling;
     private double setbackViolationThreshold;
+    private double obviousOffset;
     // Current advantage gained
     private double advantageGained = 0;
     private static final CompletePredictionEvent.Channel COMPLETE_CHANNEL = GrimAPI.INSTANCE.getEventBus().get(CompletePredictionEvent.class);
@@ -109,10 +110,15 @@ public class OffsetHandler extends Check implements PostPredictionListener {
                     flags.incrementAndGet();
                     predictionComplete.setIdentifier(flagId);
 
-                    boolean firstViolation = isSetbackOnFirstViolation();
-                    if ((firstViolation || advantageGained >= maxAdvantage || offset >= immediateSetbackThreshold)
+                    // Blatant movement (fly, big speed, blink): alert and set back at once
+                    boolean obvious = isObviousEnabled() && offset >= obviousOffset;
+                    if (obvious) {
+                        alertObvious(() -> humanFormattedOffset(offset) + " /gl " + flagId);
+                    }
+
+                    if ((obvious || advantageGained >= maxAdvantage || offset >= immediateSetbackThreshold)
                             && !isNoSetbackPermission()
-                            && (firstViolation || violations >= setbackViolationThreshold)) {
+                            && (obvious || violations >= setbackViolationThreshold)) {
                         player.getSetbackTeleportUtil().executeViolationSetback();
                     }
                 }
@@ -166,6 +172,7 @@ public class OffsetHandler extends Check implements PostPredictionListener {
         maxAdvantage = config.getDoubleElse("Simulation.max-advantage", 1);
         maxCeiling = config.getDoubleElse("Simulation.max-ceiling", 4);
         setbackViolationThreshold = config.getDoubleElse("Simulation.setback-violation-threshold", 1);
+        obviousOffset = config.getDoubleElse("obvious-cheats.simulation-offset", 0.3);
         if (maxAdvantage == -1) maxAdvantage = Double.MAX_VALUE;
         if (immediateSetbackThreshold == -1) immediateSetbackThreshold = Double.MAX_VALUE;
     }

@@ -222,6 +222,24 @@ public class PunishmentManager implements ConfigReloadable {
         return sentDebug;
     }
 
+    /** An [alert] for a blatant violation, sent at once instead of waiting for the group's alert threshold. */
+    public void sendImmediateAlert(Check check, Supplier<String> verbose) {
+        int vl = (int) check.getViolations();
+        for (PunishGroup group : groups) {
+            if (group.checks.contains(check)) {
+                vl = Math.max(vl, getViolations(group, check));
+                break;
+            }
+        }
+        String cmd = replaceAlertPlaceholders("[alert]", vl, check, safeGet(verbose));
+        Component message = MessageUtil.miniMessage(cmd);
+        if (testMode) {
+            player.sendMessage(message);
+        } else {
+            GrimAPI.INSTANCE.getAlertManager().sendAlert(message, null, player.user.getName());
+        }
+    }
+
     private static String safeGet(Supplier<String> supplier) {
         try {
             String value = supplier.get();

@@ -341,10 +341,18 @@ exploit:
 # Enable logging plugins who have injected into netty on join to debug compatibility issues
 debug-pipeline-on-join: false
 
-# Set players back on the first violation of any check that can set back, instead of waiting for its setbackvl
-# (Simulation also stops waiting for max-advantage, AntiKB for its advantage threshold).
-# Strictest option: a single false flag also rubberbands a legit player. setbackvl: -1 on a check still disables its setbacks.
-setback-on-first-violation: true
+# Blatant cheats are acted on at once: alert on the first violation and set back right away.
+# Everything else keeps its normal thresholds (setbackvl per check, alert thresholds in punishments.yml).
+obvious-cheats:
+    enabled: true
+    # Movement off by at least this many blocks in a single tick (fly, big speed, step, blink)
+    simulation-offset: 0.3
+    # Knockback ignored by at least this many blocks (velocity / anti-knockback cancelling most of it)
+    knockback-offset: 0.2
+    # Timer: at least this many extra movement packets within one second (about 1.25x speed and above)
+    timer-packets-per-second: 5
+    # Minimum seconds between two immediate alerts of the same check for the same player (setbacks are not limited)
+    alert-cooldown-seconds: 2
 
 # Enables all experimental checks
 experimental-checks: false
@@ -410,7 +418,7 @@ update-permission-ticks: -1
 #   config-version: bumped on every breaking shape change. Old configs
 #                   auto-migrate up via the bundled updater on next start.
 config-flavor: V2
-config-version: 19
+config-version: 20
 
 # Server-side guards (Paper/Folia; ported from LegacyGrim, tightening patches only)
 # Block ender pearl throws at point blank into a solid wall/ceiling (pearl phasing)

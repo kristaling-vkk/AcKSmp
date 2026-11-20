@@ -57,7 +57,7 @@ Punishments:
       - "CrashB"
     commands:
       - "1:1 [alert]"
-      - "1:1 [log]"
+      - "5:10 [log]"
       - "5:0 [webhook]"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
   ExploitBan:
@@ -66,7 +66,7 @@ Punishments:
       - "ExploitA"
     commands:
       - "1:1 [alert]"
-      - "1:1 [log]"
+      - "5:10 [log]"
       - "5:0 [webhook]"
       - "10:0 ban %player% [GroundedGrim] Exploit (%check_name%)"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
@@ -122,7 +122,7 @@ Punishments:
       - "AirLiquidBreak"
     commands:
       - "1:1 [alert]"
-      - "1:1 [log]"
+      - "5:10 [log]"
       - "5:0 [webhook]"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
   Timer:
@@ -132,8 +132,8 @@ Punishments:
       - "TimerLimit"
       - "TickTimer"
     commands:
-      - "1:1 [alert]"
-      - "1:1 [log]"
+      - "20:20 [alert]"
+      - "20:20 [log]"
       - "40:0 [webhook]"
       - "40:0 [proxy]"
       - "750:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
@@ -191,7 +191,7 @@ Punishments:
       - "AutoTotem"
     commands:
       - "1:1 [alert]"
-      - "1:1 [log]"
+      - "5:10 [log]"
       - "5:0 [webhook]"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
   AirStuck:
@@ -212,7 +212,7 @@ Punishments:
       - "AutoSwapC"
     commands:
       - "1:1 [alert]"
-      - "1:1 [log]"
+      - "5:10 [log]"
       - "5:0 [webhook]"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
   InventoryDKick:
@@ -229,8 +229,8 @@ Punishments:
     checks:
       - "InventoryE"
     commands:
-      - "1:1 [alert]"
-      - "1:1 [log]"
+      - "5:5 [alert]"
+      - "5:5 [log]"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
   Simulation:
     remove-violations-after: 2700
@@ -239,7 +239,7 @@ Punishments:
       - "GroundSpoof"
       - "NoFall"
     commands:
-      - "1:1 [alert]"
+      - "100:40 [alert]"
       - "1:1 [log]"
       - "100:100 [webhook]"
       - "100:100 [proxy]"
@@ -250,7 +250,7 @@ Punishments:
       - "Knockback"
       - "Explosion"
     commands:
-      - "1:1 [alert]"
+      - "2:2 [alert]"
       - "1:1 [log]"
       - "20:20 [webhook]"
       - "20:20 [proxy]"
@@ -260,7 +260,7 @@ Punishments:
     checks:
       - "Post"
     commands:
-      - "1:1 [alert]"
+      - "20:20 [alert]"
       - "1:1 [log]"
       - "40:40 [webhook]"
       - "40:40 [proxy]"
@@ -282,7 +282,7 @@ Punishments:
       - "!BadPacketsY"
       - "PacketOrder"
     commands:
-      - "1:1 [alert]"
+      - "20:20 [alert]"
       - "1:1 [log]"
       - "40:40 [webhook]"
       - "40:40 [proxy]"
@@ -296,7 +296,7 @@ Punishments:
       - "ElytraD"
     commands:
       - "1:1 [alert]"
-      - "1:1 [log]"
+      - "5:10 [log]"
       - "5:0 [webhook]"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
   ElytraJKick:
@@ -304,7 +304,7 @@ Punishments:
     checks:
       - "ElytraJ"
     commands:
-      - "1:1 [alert]"
+      - "5:3 [alert]"
       - "1:1 [log]"
       - "5:3 [webhook]"
       - "5:3 [proxy]"
@@ -315,7 +315,7 @@ Punishments:
       - "ElytraM"
     commands:
       - "1:1 [alert]"
-      - "1:1 [log]"
+      - "5:10 [log]"
       - "5:0 [webhook]"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
   ElytraOAlert:
@@ -359,8 +359,8 @@ Punishments:
       - "!ElytraO"
       - "!ElytraP"
     commands:
-      - "1:1 [alert]"
-      - "1:1 [log]"
+      - "10:5 [alert]"
+      - "10:5 [log]"
       - "20:10 [webhook]"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
   SprintKick:
@@ -397,7 +397,7 @@ Punishments:
       - "ExploitD"
       - "ExploitE"
     commands:
-      - "1:1 [alert]"
+      - "10:5 [alert]"
       - "1:1 [log]"
       - "20:10 [webhook]"
       - "20:10 [proxy]"
@@ -408,7 +408,7 @@ Punishments:
       - "Interact"
       - "Aim"
     commands:
-      - "1:1 [alert]"
+      - "20:40 [alert]"
       - "1:1 [log]"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
   AuraSnapBack:
@@ -416,8 +416,8 @@ Punishments:
     checks:
       - "AuraSnapBack"
     commands:
-      - "1:1 [alert]"
-      - "1:1 [log]"
+      - "5:10 [alert]"
+      - "5:10 [log]"
       - "10:0 [webhook]"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
   # Dês da 2.2.10, não temos verificações de AutoClicker, isso é somente um placeholder. Grim vai verificar por AutoClicker no futuro.
@@ -426,7 +426,7 @@ Punishments:
     checks:
       - "Autoclicker"
     commands:
-      - "1:1 [alert]"
+      - "20:40 [alert]"
       - "1:1 [log]"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
   # Heuristic checks ported from Grom. Statistical, so alert/log only - no automatic kicks.
@@ -440,6 +440,6 @@ Punishments:
       - "ScaffoldRatio"
       - "ScaffoldSync"
     commands:
-      - "1:1 [alert]"
+      - "10:20 [alert]"
       - "1:1 [log]"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"

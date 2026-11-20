@@ -132,7 +132,7 @@ Punishments:
       - "AirLiquidBreak"
     commands:
       - "1:1 [alert]"
-      - "1:1 [log]"
+      - "5:10 [log]"
       - "5:0 [webhook]"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
   Timer:
@@ -142,8 +142,8 @@ Punishments:
       - "TimerLimit"
       - "TickTimer"
     commands:
-      - "1:1 [alert]"
-      - "1:1 [log]"
+      - "20:20 [alert]"
+      - "20:20 [log]"
       - "40:0 [webhook]"
       - "40:0 [proxy]"
       - "750:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
@@ -239,8 +239,8 @@ Punishments:
     checks:
       - "InventoryE"
     commands:
-      - "1:1 [alert]"
-      - "1:1 [log]"
+      - "5:5 [alert]"
+      - "5:5 [log]"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
   Simulation:
     remove-violations-after: 2700
@@ -258,10 +258,10 @@ Punishments:
     # Examples:
     # - "100:0 kick %player% incorrect movement!"   fires once on flag 100
     # - "100:50 say %player% is cheating"           fires on flags 100, 150, 200, ...
-    # - "1:1 [alert]"                               fires on flags 5, 8, 11, 14, ...
+    # - "5:3 [alert]"                               fires on flags 5, 8, 11, 14, ...
     #
     commands:
-      - "1:1 [alert]"
+      - "100:40 [alert]"
       - "1:1 [log]"
       - "100:100 [webhook]"
       - "100:100 [proxy]"
@@ -272,7 +272,7 @@ Punishments:
       - "Knockback"
       - "Explosion"
     commands:
-      - "1:1 [alert]"
+      - "2:2 [alert]"
       - "1:1 [log]"
       - "20:20 [webhook]"
       - "20:20 [proxy]"
@@ -282,7 +282,7 @@ Punishments:
     checks:
       - "Post"
     commands:
-      - "1:1 [alert]"
+      - "20:20 [alert]"
       - "1:1 [log]"
       - "40:40 [webhook]"
       - "40:40 [proxy]"
@@ -304,7 +304,7 @@ Punishments:
       - "!BadPacketsY"
       - "PacketOrder"
     commands:
-      - "1:1 [alert]"
+      - "20:20 [alert]"
       - "1:1 [log]"
       - "40:40 [webhook]"
       - "40:40 [proxy]"
@@ -326,7 +326,7 @@ Punishments:
     checks:
       - "ElytraJ"
     commands:
-      - "1:1 [alert]"
+      - "5:3 [alert]"
       - "1:1 [log]"
       - "5:3 [webhook]"
       - "5:3 [proxy]"
@@ -381,8 +381,8 @@ Punishments:
       - "!ElytraO"
       - "!ElytraP"
     commands:
-      - "1:1 [alert]"
-      - "1:1 [log]"
+      - "10:5 [alert]"
+      - "10:5 [log]"
       - "20:10 [webhook]"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
   SprintKick:
@@ -419,7 +419,7 @@ Punishments:
       - "ExploitD"
       - "ExploitE"
     commands:
-      - "1:1 [alert]"
+      - "10:5 [alert]"
       - "1:1 [log]"
       - "20:10 [webhook]"
       - "20:10 [proxy]"
@@ -430,7 +430,7 @@ Punishments:
       - "Interact"
       - "Aim"
     commands:
-      - "1:1 [alert]"
+      - "20:40 [alert]"
       - "1:1 [log]"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
   AuraSnapBack:
@@ -438,8 +438,8 @@ Punishments:
     checks:
       - "AuraSnapBack"
     commands:
-      - "1:1 [alert]"
-      - "1:1 [log]"
+      - "5:10 [alert]"
+      - "5:10 [log]"
       - "10:0 [webhook]"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
   # As of 2.2.10, there are no AutoClicker checks and this is a placeholder. Grim will include AutoClicker checks in the future.
@@ -448,7 +448,7 @@ Punishments:
     checks:
       - "Autoclicker"
     commands:
-      - "1:1 [alert]"
+      - "20:40 [alert]"
       - "1:1 [log]"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"
   # Heuristic checks ported from Grom. Statistical, so alert/log only - no automatic kicks.
@@ -462,6 +462,6 @@ Punishments:
       - "ScaffoldRatio"
       - "ScaffoldSync"
     commands:
-      - "1:1 [alert]"
+      - "10:20 [alert]"
       - "1:1 [log]"
       - "300:0 kick %player% §c§lВы были кикнуты за подозрение в использовании читов"

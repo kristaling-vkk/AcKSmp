@@ -82,7 +82,13 @@ public class Timer extends Check implements PrePredictionPacketReceiveListener {
                     player.onPacketCancel();
                 }
 
-                if (shouldSetback()) {
+                // Blatant timer (many extra packets within a second): alert and set back at once
+                boolean obvious = isObvious();
+                if (obvious) {
+                    alertObvious(() -> recentFlags() + " extra packets in 1s");
+                }
+
+                if (obvious ? canSetback() : shouldSetback()) {
                     player.getSetbackTeleportUtil().executeNonSimulatingSetback();
                 }
             }
@@ -92,6 +98,30 @@ public class Timer extends Check implements PrePredictionPacketReceiveListener {
         }
 
         limitFallBehind();
+    }
+
+    // Times of the most recent flags, to tell a blatant timer from a stray extra packet
+    private final long[] flagTimes = new long[32];
+    private int flagIndex;
+    protected int obviousPacketsPerSecond;
+
+    private boolean isObvious() {
+        long now = System.nanoTime();
+        flagTimes[flagIndex] = now;
+        flagIndex = (flagIndex + 1) % flagTimes.length;
+        return isObviousEnabled() && obviousPacketsPerSecond > 0 && recentFlags(now) >= obviousPacketsPerSecond;
+    }
+
+    private int recentFlags() {
+        return recentFlags(System.nanoTime());
+    }
+
+    private int recentFlags(long now) {
+        int count = 0;
+        for (long time : flagTimes) {
+            if (time != 0 && now - time <= 1_000_000_000L) count++;
+        }
+        return count;
     }
 
     /** Called for every packet from the client before it is counted. */
@@ -115,5 +145,6 @@ public class Timer extends Check implements PrePredictionPacketReceiveListener {
     @Override
     public void onReload(@NotNull ConfigManager config) {
         clockDrift = (long) (config.getDoubleElse(getConfigName() + ".drift", 120.0) * 1e6);
+        obviousPacketsPerSecond = Math.min(32, config.getIntElse("obvious-cheats.timer-packets-per-second", 5));
     }
 }

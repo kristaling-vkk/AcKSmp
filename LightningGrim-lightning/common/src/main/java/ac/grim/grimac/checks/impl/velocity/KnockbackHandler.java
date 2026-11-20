@@ -38,6 +38,7 @@ public class KnockbackHandler extends Check implements PacketSendListener, PostP
     private double maxAdv, immediate, ceiling, multiplier;
 
     private double threshold;
+    private double obviousOffset;
 
     public KnockbackHandler(GrimPlayer player) {
         super(player);
@@ -216,8 +217,15 @@ public class KnockbackHandler extends Check implements PacketSendListener, PostP
                     }
                 } else {
                     boolean ignored = player.likelyKB.offset == Integer.MAX_VALUE;
-                    if (flag(V.write(verbose()).bool(ignored).f64(player.likelyKB.offset))) { // This velocity was sent by the server.
-                        if (isSetbackOnFirstViolation() || player.likelyKB.offset >= immediate || threshold >= maxAdv) {
+                    double kbOffset = player.likelyKB.offset;
+                    if (flag(V.write(verbose()).bool(ignored).f64(kbOffset))) { // This velocity was sent by the server.
+                        // Blatant velocity cancel (most of the knockback ignored): alert and set back at once
+                        if (isObviousEnabled() && kbOffset >= obviousOffset) {
+                            alertObvious(() -> ignored ? "ignored knockback" : "o: " + formatOffset(kbOffset));
+                            if (canSetback()) {
+                                player.getSetbackTeleportUtil().executeViolationSetback();
+                            }
+                        } else if (kbOffset >= immediate || threshold >= maxAdv) {
                             setbackIfAboveSetbackVL();
                         }
                     } else {
@@ -262,6 +270,7 @@ public class KnockbackHandler extends Check implements PacketSendListener, PostP
         immediate = config.getDoubleElse("Knockback.immediate-setback-threshold", 0.1);
         multiplier = config.getDoubleElse("Knockback.setback-decay-multiplier", 0.999);
         ceiling = config.getDoubleElse("Knockback.max-ceiling", 4);
+        obviousOffset = config.getDoubleElse("obvious-cheats.knockback-offset", 0.2);
         if (maxAdv < 0) maxAdv = Double.MAX_VALUE;
         if (immediate < 0) immediate = Double.MAX_VALUE;
     }
