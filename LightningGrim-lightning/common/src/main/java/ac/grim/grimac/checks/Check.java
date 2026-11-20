@@ -55,9 +55,11 @@ public class Check extends GrimProcessor implements AbstractCheck {
     private @NotNull String description;
     private double decay;
     private double setbackVL;
-    // setback-on-first-violation: set back on the first flag instead of waiting for setbackVL (setbackvl: -1 still disables)
-    private boolean setbackOnFirstViolation;
     private boolean setbackDisabled;
+    // obvious-cheats: blatant violations alert and set back at once, everything else keeps its normal thresholds
+    private boolean obviousEnabled;
+    private long obviousAlertCooldownMillis;
+    private long lastObviousAlert;
     @Setter private boolean isEnabled;
 
     // permissions
@@ -265,7 +267,8 @@ public class Check extends GrimProcessor implements AbstractCheck {
             setbackDisabled = setbackVL == -1;
             if (setbackVL == -1) setbackVL = Double.MAX_VALUE;
         }
-        setbackOnFirstViolation = configuration.getBooleanElse("setback-on-first-violation", false);
+        obviousEnabled = configuration.getBooleanElse("obvious-cheats.enabled", true);
+        obviousAlertCooldownMillis = (long) (configuration.getDoubleElse("obvious-cheats.alert-cooldown-seconds", 2.0) * 1000);
         onReload(new ChecksConfigView(configuration));
     }
 
@@ -285,13 +288,29 @@ public class Check extends GrimProcessor implements AbstractCheck {
     }
 
     public boolean shouldSetback() {
-        if (noSetbackPermission || setbackDisabled) return false;
-        return setbackOnFirstViolation ? violations > 0 : violations > setbackVL;
+        return !noSetbackPermission && violations > setbackVL;
     }
 
-    /** True when the server wants every check to set back on its first flag. */
-    public boolean isSetbackOnFirstViolation() {
-        return setbackOnFirstViolation && !setbackDisabled;
+    /** Whether blatant violations of this check should be acted on at once (obvious-cheats.enabled). */
+    public boolean isObviousEnabled() {
+        return obviousEnabled;
+    }
+
+    /** Setbacks are allowed for this player and not turned off for this check (setbackvl: -1). */
+    public boolean canSetback() {
+        return !noSetbackPermission && !setbackDisabled;
+    }
+
+    /**
+     * Sends an alert for a blatant violation right away, ignoring the group's alert threshold in punishments.yml.
+     * Rate limited per check (obvious-cheats.alert-cooldown-seconds) so a cheat flagging every tick doesn't flood chat.
+     */
+    public void alertObvious(@NotNull Supplier<String> verbose) {
+        if (!obviousEnabled) return;
+        long now = System.currentTimeMillis();
+        if (now - lastObviousAlert < obviousAlertCooldownMillis) return;
+        lastObviousAlert = now;
+        player.punishmentManager.sendImmediateAlert(this, memoize(verbose));
     }
 
     public boolean executeViolationSetback() {

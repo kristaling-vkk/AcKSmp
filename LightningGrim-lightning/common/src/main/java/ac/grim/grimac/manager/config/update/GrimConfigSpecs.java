@@ -78,9 +78,12 @@ public final class GrimConfigSpecs {
      * <p>v17 → v18: adds {@code Knockback.setbackvl} (3). No explicit migration is needed.
      *
      * <p>v18 → v19: adds {@code setback-on-first-violation} (true). No explicit migration is needed.
+     *
+     * <p>v19 → v20: replaces {@code setback-on-first-violation} with the {@code obvious-cheats} section. The
+     * auto-lift drops the old key since the bundled default no longer has it.
      */
     public static @NotNull ConfigUpdater.Spec mainConfig() {
-        return ConfigUpdater.Spec.builder("/config/", 19, ConfigUpdater.ConfigFlavor.V2)
+        return ConfigUpdater.Spec.builder("/config/", 20, ConfigUpdater.ConfigFlavor.V2)
                 .migration(10, ctx -> {
                     String typeRaw = ctx.input().getString("history.database.type");
                     String type = typeRaw == null ? null : typeRaw.trim().toUpperCase(Locale.ROOT);
