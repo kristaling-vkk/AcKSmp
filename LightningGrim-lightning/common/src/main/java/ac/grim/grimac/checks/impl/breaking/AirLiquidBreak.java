@@ -37,6 +37,9 @@ public class AirLiquidBreak extends Check implements BlockBreakListener {
         if (blockBreak.action != DiggingAction.START_DIGGING && blockBreak.action != DiggingAction.FINISHED_DIGGING)
             return;
 
+        // Digging packets sent around the moment of death can target blocks that are already gone
+        if (player.compensatedEntities.self.isDead || System.currentTimeMillis() - player.lastDeathMillis < 1000) return;
+
         final StateType block = blockBreak.block.getType();
 
         // Fixes false from breaking kelp underwater

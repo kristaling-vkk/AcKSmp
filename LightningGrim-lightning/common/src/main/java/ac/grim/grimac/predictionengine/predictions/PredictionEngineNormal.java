@@ -68,7 +68,9 @@ public class PredictionEngineNormal extends PredictionEngine {
             Vector3dm jump = vector.vector.clone();
 
             if (!player.isFlying) {
-                if (player.jumpDelay != 0) {
+                // Vanilla's 10-tick jump delay (ManInMyVan's unmerged branch). Off by default: when Grim once picks the
+                // wrong tick as the jump (knockback, 0.03), it forbids the next legit jump and flags a 0.42 offset
+                if (player.jumpDelay != 0 && player.isEnforceJumpDelay()) {
                     return;
                 }
 

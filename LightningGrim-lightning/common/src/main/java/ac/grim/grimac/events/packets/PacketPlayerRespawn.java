@@ -103,6 +103,7 @@ public class PacketPlayerRespawn extends PacketListenerAbstract {
             }
 
             if (health.getHealth() <= 0) {
+                player.lastDeathMillis = System.currentTimeMillis();
                 player.latencyUtils.addRealTimeTask(player.lastTransactionSent.get(), () -> {
                     player.compensatedEntities.self.isDead = true;
                     player.hasRotatedSinceSpawn = false;

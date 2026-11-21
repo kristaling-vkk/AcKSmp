@@ -306,6 +306,9 @@ public class GrimPlayer implements GrimUser {
     public boolean isJumping;
     public boolean lastJumping;
     public int jumpDelay;
+    // When the server last told this player they died (health <= 0), System.currentTimeMillis()
+    public volatile long lastDeathMillis;
+    @Getter private boolean enforceJumpDelay = false; // config: Simulation.enforce-jump-delay
     public final @NotNull EntityFluidInteraction fluidInteraction = new EntityFluidInteraction(this, FluidTag.WATER, FluidTag.LAVA);
     public boolean canFloatWhileRidden;
 
@@ -1037,6 +1040,7 @@ public class GrimPlayer implements GrimUser {
         maxTransactionTime = GrimMath.clamp(config.getIntElse("max-transaction-time", 60), 1, 180);
         ignoreDuplicatePacketRotation = config.getBooleanElse("ignore-duplicate-packet-rotation", true);
         strictDuplicateHandling = config.getBooleanElse("strict-duplicate-handling", false);
+        enforceJumpDelay = config.getBooleanElse("Simulation.enforce-jump-delay", false);
         cancelDuplicatePacket = config.getBooleanElse("cancel-duplicate-packet", true);
 
         boolean shouldDisableResync = config.getBooleanElse("disable-default-resync-handler", false);
