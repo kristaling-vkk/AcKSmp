@@ -81,9 +81,11 @@ public final class GrimConfigSpecs {
      *
      * <p>v19 → v20: replaces {@code setback-on-first-violation} with the {@code obvious-cheats} section. The
      * auto-lift drops the old key since the bundled default no longer has it.
+     *
+     * <p>v20 → v21: adds {@code Simulation.enforce-jump-delay} (false). No explicit migration is needed.
      */
     public static @NotNull ConfigUpdater.Spec mainConfig() {
-        return ConfigUpdater.Spec.builder("/config/", 20, ConfigUpdater.ConfigFlavor.V2)
+        return ConfigUpdater.Spec.builder("/config/", 21, ConfigUpdater.ConfigFlavor.V2)
                 .migration(10, ctx -> {
                     String typeRaw = ctx.input().getString("history.database.type");
                     String type = typeRaw == null ? null : typeRaw.trim().toUpperCase(Locale.ROOT);

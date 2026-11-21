@@ -97,6 +97,9 @@ Simulation:
     # Порог уровня нарушения для отката
     # 1 для старого поведения
     setback-violation-threshold: 1
+    # Ванильная задержка прыжка в 10 тиков. Выключено: если Grim хоть раз ошибётся, какой тик был прыжком (отдача, 0.03),
+    # он запретит следующий честный прыжок и даст ложный флаг 0.42
+    enforce-jump-delay: false
     # Max residual tolerance for firework look interpolation (blocks/tick)
     # Increase to 0.10 if getting false positives during fast turns with fireworks
     firework-residual-cap: 0.05
@@ -376,7 +379,7 @@ max-ping-firework-boost: 1000
 update-permission-ticks: -1
 
 config-flavor: V2
-config-version: 20
+config-version: 21
 
 # Серверные защиты (Paper/Folia; перенесены из LegacyGrim, только ужесточения)
 # Блокировать бросок жемчуга впритык в твёрдую стену/потолок (фаза через жемчуг)

@@ -881,6 +881,10 @@ public final class Collisions {
     }
 
     public static boolean onClimbable(GrimPlayer player, double x, double y, double z) {
+        // Vanilla Player.onClimbable(): a player flying with abilities never climbs, so ladders, vines and glow berry
+        // vines don't clamp creative/spectator/fly-command movement to 0.15 blocks per tick
+        if (player.isFlying) return false;
+
         WrappedBlockState blockState = player.compensatedWorld.getBlock(x, y, z);
         StateType blockMaterial = blockState.getType();
 

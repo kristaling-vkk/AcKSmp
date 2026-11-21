@@ -6,21 +6,21 @@ import ac.grim.grimac.checks.CheckData;
 import ac.grim.grimac.checks.type.PostPredictionListener;
 import ac.grim.grimac.player.GrimPlayer;
 import ac.grim.grimac.utils.anticheat.update.PredictionComplete;
-import com.github.retrooper.packetevents.protocol.player.InteractionHand;
+import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import org.jetbrains.annotations.NotNull;
 
-// Flagging logic from ManInMyVan's unmerged upstream "noslow" branch (GrimAnticheat/Grim PR #2864):
-// off-hand use flags on the first bad tick, main-hand use on two bad ticks in the same slot, and a
-// pending flag survives into the next tick so slot/use toggling can no longer reset it every other tick.
+// Offsets while slowed by an item add up and flag past a small buffer (GroundedGrim), so one imprecise tick in PvP
+// doesn't flag. Ticks without item use let the buffer decay instead of clearing it: toggling the item every other
+// tick used to reset it, which is the bypass ManInMyVan's unmerged upstream "noslow" branch (PR #2864) closed.
 @CheckData(name = "NoSlow", stableKey = "grim.movement.noslow", description = "Was not slowed while using an item", setback = 5)
 public class NoSlow extends Check implements PostPredictionListener {
     // The player sends that they switched items the next tick if they switch from an item that can be used
     // to another item that can be used.  What the fuck Mojang.  Affects 1.8 (and most likely 1.7) clients.
     public boolean didSlotChangeLastTick = false;
-    public int flaggedMainHandSlotLastTick = -1;
-    private boolean needFlag;
     private double offsetToFlag;
+    private double bufferToFlag;
     private double bestOffset = 1;
+    private double buffer;
 
     public NoSlow(GrimPlayer player) {
         super(player);
@@ -28,36 +28,38 @@ public class NoSlow extends Check implements PostPredictionListener {
 
     @Override
     public void onPredictionComplete(final PredictionComplete predictionComplete) {
-        if (needFlag && flaggedMainHandSlotLastTick == player.packetStateData.lastSlotSelected
-                && player.packetStateData.isSlowedByUsingItem() && !didSlotChangeLastTick) {
-            flagAndAlertWithSetback();
+        if (!predictionComplete.isChecked()) {
+            bestOffset = 1;
+            return;
         }
 
-        needFlag = false;
+        if (player.packetStateData.isSlowedByUsingItem()) {
+            // 1.8 users are not slowed the first tick they use an item, strangely
+            if (player.getClientVersion().isOlderThanOrEquals(ClientVersion.V_1_8) && didSlotChangeLastTick) {
+                didSlotChangeLastTick = false;
+                bestOffset = 1;
+                return;
+            }
 
-        int flaggedMainHandSlotThisTick = -1;
-        // If the player was using an item for certain, and their predicted velocity had a flipped item.
-        // Stuck-speed blocks (cobweb, berry bush, powder snow) already override the item slowdown.
-        if (predictionComplete.isChecked() && player.packetStateData.isSlowedByUsingItem()
-                && player.stuckSpeedMultiplier.getX() >= 0.99) {
+            // Stuck-speed blocks (cobweb, berry bush, powder snow) already override the item slowdown
+            if (player.stuckSpeedMultiplier.getX() < 0.99) {
+                bestOffset = 1;
+                return;
+            }
+
             if (bestOffset > offsetToFlag) {
-                int slot = player.packetStateData.lastSlotSelected;
-                if (player.packetStateData.itemInUseHand == InteractionHand.OFF_HAND) {
+                buffer += bestOffset;
+                if (buffer > bufferToFlag) {
                     flagAndAlertWithSetback();
-                } else if (player.packetStateData.getSlowedByUsingItemSlot() == slot) {
-                    flaggedMainHandSlotThisTick = slot;
-                    if (flaggedMainHandSlotLastTick == flaggedMainHandSlotThisTick) {
-                        flagAndAlertWithSetback();
-                    } else {
-                        needFlag = true;
-                    }
                 }
             } else {
+                buffer = Math.max(0, buffer - 0.001);
                 reward();
             }
+        } else {
+            buffer *= 0.9;
         }
 
-        flaggedMainHandSlotLastTick = flaggedMainHandSlotThisTick;
         bestOffset = 1;
         didSlotChangeLastTick = false;
     }
@@ -69,5 +71,6 @@ public class NoSlow extends Check implements PostPredictionListener {
     @Override
     public void onReload(@NotNull ConfigManager config) {
         offsetToFlag = config.getDoubleElse(getConfigName() + ".threshold", 0.001);
+        bufferToFlag = config.getDoubleElse(getConfigName() + ".buffer", 0.15);
     }
 }

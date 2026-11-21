@@ -41,6 +41,7 @@ public class PacketChangeGameState extends GrimProcessor implements PacketSendLi
                     }
 
                     if (previous == GameMode.SPECTATOR && player.gamemode != GameMode.SPECTATOR) {
+                        player.uncertaintyHandler.lastSpectatorExit.reset();
                         GrimAPI.INSTANCE.getSpectateManager().handlePlayerStopSpectating(player.uuid);
                     }
                 });

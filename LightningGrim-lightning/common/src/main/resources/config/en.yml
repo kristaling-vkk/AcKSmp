@@ -97,6 +97,9 @@ Simulation:
     # Violation level threshold for setback
     # 1 for old behavior
     setback-violation-threshold: 1
+    # Enforce vanilla's 10-tick jump delay. Off: when Grim once picks the wrong tick as the jump (knockback, 0.03),
+    # it forbids the next legit jump and flags a 0.42 offset
+    enforce-jump-delay: false
     # Max residual tolerance for firework look interpolation (blocks/tick)
     # Increase to 0.10 if getting false positives during fast turns with fireworks
     firework-residual-cap: 0.05
@@ -418,7 +421,7 @@ update-permission-ticks: -1
 #   config-version: bumped on every breaking shape change. Old configs
 #                   auto-migrate up via the bundled updater on next start.
 config-flavor: V2
-config-version: 20
+config-version: 21
 
 # Server-side guards (Paper/Folia; ported from LegacyGrim, tightening patches only)
 # Block ender pearl throws at point blank into a solid wall/ceiling (pearl phasing)

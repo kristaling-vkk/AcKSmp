@@ -98,6 +98,9 @@ Simulation:
     # Quantas violações para começar a recuar o jogador?
     # 1 para comportamento antigo
     setback-violation-threshold: 1
+    # Enforce vanilla's 10-tick jump delay. Off: when Grim once picks the wrong tick as the jump (knockback, 0.03),
+    # it forbids the next legit jump and flags a 0.42 offset
+    enforce-jump-delay: false
     # Max residual tolerance for firework look interpolation (blocks/tick)
     # Increase to 0.10 if getting false positives during fast turns with fireworks
     firework-residual-cap: 0.05
@@ -387,4 +390,4 @@ max-ping-firework-boost: 1000
 update-permission-ticks: -1
 
 config-flavor: V2
-config-version: 20
+config-version: 21

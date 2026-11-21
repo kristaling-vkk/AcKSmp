@@ -510,7 +510,10 @@ public class MovementCheckRunner extends GrimProcessor {
             // Dead players can't cheat, if you find a way how they could, open an issue
             player.predictedVelocity = new VectorData(new Vector3dm(), VectorData.VectorType.Dead);
             player.clientVelocity = new Vector3dm();
-        } else if (player.disableGrim || (PacketEvents.getAPI().getServerManager().getVersion().isNewerThanOrEquals(ServerVersion.V_1_8) && player.gamemode == GameMode.SPECTATOR) || (player.isFlying && !player.flyingPredictionEnabled) || (player.isExemptElytra() && player.isGliding)) {
+        } else if (player.disableGrim || (PacketEvents.getAPI().getServerManager().getVersion().isNewerThanOrEquals(ServerVersion.V_1_8) && player.gamemode == GameMode.SPECTATOR) || (player.isFlying && (!player.flyingPredictionEnabled || player.gamemode == GameMode.CREATIVE))
+                // Creative flight is not checked (as upstream): a creative player can already go anywhere. FlyingPrediction
+                // stays on for survival flight (/fly). Leaving spectator pushes the client out of blocks it may be inside.
+                || player.uncertaintyHandler.lastSpectatorExit.hasOccurredSince(10) || (player.isExemptElytra() && player.isGliding)) {
             // We could technically check spectator but what's the point...
             player.predictedVelocity = new VectorData(player.actualMovement, VectorData.VectorType.Spectator);
             player.clientVelocity = player.actualMovement.clone();
